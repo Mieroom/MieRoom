@@ -20,6 +20,7 @@ import {
   Td,
   Th,
 } from "@/components/ui/parts";
+import { monthHalves } from "@/lib/domain/month-table";
 import { PERIODS } from "@/lib/domain/periods";
 import {
   addDays,
@@ -37,7 +38,6 @@ import { withQuery } from "@/lib/url";
 import {
   isRunning,
   LessonBadges,
-  periodLabel,
   roomText,
   teacherText,
   type LessonView,
@@ -47,12 +47,7 @@ import { WeekStartMemory } from "./week-start-memory";
 
 export type TimetableMode = "day" | "week" | "month";
 
-// The month grid gives 土/日 narrower columns (usually no lessons). Written out in
-// full so that Tailwind finds both class names.
-const MONTH_GRID_COLUMNS: Record<WeekStart, string> = {
-  mon: "grid-cols-[repeat(5,minmax(0,1fr))_minmax(0,0.6fr)_minmax(0,0.6fr)]",
-  sun: "grid-cols-[minmax(0,0.6fr)_repeat(5,minmax(0,1fr))_minmax(0,0.6fr)]",
-};
+const WEEKDAY_NAMES = weekdayHeaders("sun");
 
 function DayView({
   day,
@@ -382,9 +377,9 @@ function CompactLesson({ lesson }: { lesson: LessonView }) {
   );
 }
 
-// Below lg (phones, and tablets where the sidebar leaves about 512px) the month is a
-// compact calendar whose days open the day view. From lg it is the full grid; the grid
-// is also what is printed.
+// Below xl (phones, tablets, and laptops where the sidebar leaves under 1000px) the month
+// is a compact calendar whose days open the day view. From xl it is the table laid out
+// like the paper timetable; the table is also what is printed.
 function MonthView({
   days,
   month,
@@ -398,7 +393,9 @@ function MonthView({
   weekStart: WeekStart;
   dayHref: (date: string) => string;
 }) {
-  const lastRowFrom = days.length - 7;
+  // The page also loads the days of the first and last weeks that fall in the next
+  // and previous months (the calendar draws them); the table does not.
+  const inMonth = days.filter((day) => monthOf(day.date) === month);
   return (
     <>
       <MonthCalendar
@@ -408,82 +405,229 @@ function MonthView({
         weekStart={weekStart}
         dayHref={dayHref}
       />
-      {/* From xl only: at lg the weekday columns are too narrow to read a subject,
-          so the compact calendar is used up to xl. 土/日 are narrower (usually no
-          lessons). Below 680px the grid scrolls sideways. The last column and row drop their outer border, which the box
-          already draws. */}
-      <div className="scroll-shadow-x hidden overflow-auto rounded-[11px] border border-line xl:block print:block">
-        <div
-          className={`grid min-w-[680px] ${MONTH_GRID_COLUMNS[weekStart]} [&>*:nth-child(7n)]:border-r-0`}
-        >
-          {weekdayHeaders(weekStart).map((name) => (
-            <div
-              key={name}
-              className="border-b border-line bg-[#f6f8fc] px-3 py-2 text-[11px] font-semibold text-[#586579]"
-            >
-              {name}
-            </div>
-          ))}
-          {days.map((day, index) => {
-            const outside = monthOf(day.date) !== month;
-            const weekend = weekdayOf(day.date) % 6 === 0;
-            const isToday = day.date === today;
-            return (
-              <div
-                key={day.date}
-                className={`min-h-[104px] min-w-0 border-r border-line p-2 text-[11px] ${
-                  index >= lastRowFrom ? "" : "border-b"
-                } ${
-                  isToday
-                    ? "bg-[#f2f5ff]"
-                    : outside
-                      ? "bg-[#f6f8fc] text-muted"
-                      : ""
-                }`}
-              >
-                {/* The day number opens the day view, where cut subjects show in full. */}
-                <div>
-                  <Link
-                    href={dayHref(day.date)}
-                    className={`-my-1 inline-flex min-h-6 min-w-6 items-center hover:underline ${isToday ? "font-bold text-brand-dark" : outside ? "font-normal" : "font-bold"}`}
-                  >
-                    <span className="sr-only">{formatLongDate(day.date)}</span>
-                    <span aria-hidden="true">
-                      {Number(day.date.slice(8, 10))}
-                    </span>
-                    {isToday && (
-                      <span className="ml-1.5 font-normal">今日</span>
-                    )}
-                  </Link>
-                </div>
-                {day.closures.map((name) => (
-                  <div key={name} className="mt-0.5 text-amber-ink">
-                    {name}
-                  </div>
-                ))}
-                {!outside && !weekend && !day.entered && (
-                  <div className="mt-0.5 text-muted">未定</div>
-                )}
-                {/* The room never truncates: only the subject does. */}
-                {day.lessons.map((lesson) => (
-                  <div
-                    key={lesson.id}
-                    className={`mt-0.5 flex gap-1 ${lesson.cancelled ? "text-muted line-through" : ""}`}
-                  >
-                    <span className="min-w-0 flex-1 truncate">
-                      {periodLabel(lesson.periodNo)} {lesson.subject}
-                    </span>
-                    <span className="shrink-0 text-muted">
-                      {roomText(lesson.room)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
+      <div className="hidden flex-col gap-4 xl:flex print:flex">
+        {monthHalves(inMonth).map((band) => (
+          <MonthBand
+            key={band[0].date}
+            days={band}
+            month={month}
+            today={today}
+            dayHref={dayHref}
+          />
+        ))}
       </div>
     </>
+  );
+}
+
+/** A day shown as one cell down all four periods, and why. null: a cell per period. */
+function wholeDayKind(
+  day: TimetableDay,
+): "closure" | "weekend" | "undecided" | null {
+  if (day.lessons.length > 0) return null;
+  if (day.closures.length > 0) return "closure";
+  if (weekdayOf(day.date) % 6 === 0) return "weekend";
+  if (!day.entered) return "undecided";
+  return null;
+}
+
+/** 土/日 without lessons: a narrow grey column, so the weekdays get the room. */
+function isQuietWeekend(day: TimetableDay): boolean {
+  return weekdayOf(day.date) % 6 === 0 && day.lessons.length === 0;
+}
+
+/** The fill of a date's header cells: today, 休み・行事, weekend, or plain. */
+function dateHeadTone(day: TimetableDay, today: string): string {
+  if (day.date === today) return "bg-[#e8ecff] text-brand-dark";
+  if (day.closures.length > 0) return "bg-amber-soft text-amber-ink";
+  if (weekdayOf(day.date) % 6 === 0) return "bg-[#edf0f5] text-muted";
+  return "bg-[#f6f8fc] text-[#586579]";
+}
+
+const MONTH_HEAD_CELL =
+  "border-b border-l border-line px-0.5 py-1.5 text-center text-[11px] font-semibold";
+const VERTICAL_TEXT =
+  "inline-block [text-orientation:upright] [writing-mode:vertical-rl]";
+
+/**
+ * Half a month as the paper timetable shows it: 日付 and 曜日 across the top, 1限〜4限
+ * down the side, and in each cell the subject, room and teacher. Below 900px of table
+ * (never at xl) it scrolls sideways with 1限〜4限 kept in view.
+ */
+function MonthBand({
+  days,
+  month,
+  today,
+  dayHref,
+}: {
+  days: TimetableDay[];
+  month: string;
+  today: string;
+  dayHref: (date: string) => string;
+}) {
+  const monthNo = Number(month.slice(5, 7));
+  return (
+    <TableWrap
+      className="print:overflow-visible"
+      tableClassName="table-fixed min-w-[900px] print:min-w-0"
+    >
+      <colgroup>
+        <col className="w-[84px]" />
+        {days.map((day) => (
+          <col key={day.date} className={isQuietWeekend(day) ? "w-7" : ""} />
+        ))}
+      </colgroup>
+      <thead>
+        <tr>
+          <Th stickyLeft dense scope="row">
+            日付({monthNo}月)
+          </Th>
+          {days.map((day) => (
+            <th
+              key={day.date}
+              scope="col"
+              className={`${MONTH_HEAD_CELL} ${dateHeadTone(day, today)}`}
+            >
+              {/* The date opens the day view. */}
+              <Link
+                href={dayHref(day.date)}
+                className="inline-flex min-h-6 min-w-6 items-center justify-center hover:underline"
+              >
+                <span className="sr-only">
+                  {formatLongDate(day.date)}
+                  {day.date === today && " 今日"}
+                </span>
+                <span aria-hidden="true">{Number(day.date.slice(8, 10))}</span>
+              </Link>
+            </th>
+          ))}
+        </tr>
+        <tr>
+          <Th stickyLeft dense scope="row">
+            曜日
+          </Th>
+          {days.map((day) => (
+            <th
+              key={day.date}
+              scope="col"
+              className={`${MONTH_HEAD_CELL} ${dateHeadTone(day, today)}`}
+            >
+              {WEEKDAY_NAMES[weekdayOf(day.date)]}
+              {/* 休み・行事 on a day that still has lessons: named here, since the
+                  column is not one merged cell. */}
+              {day.lessons.length > 0 &&
+                day.closures.map((name) => (
+                  <span
+                    key={name}
+                    className="mt-0.5 block font-normal [overflow-wrap:anywhere]"
+                  >
+                    {name}
+                  </span>
+                ))}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {PERIODS.map((period, index) => (
+          <tr key={period.no}>
+            <Td
+              stickyLeft
+              dense
+              className="align-middle font-bold text-[#4a576c]"
+            >
+              {period.label}
+              <span className="mt-0.5 block text-[11px] font-normal text-muted">
+                {period.start}-{period.end}
+              </span>
+            </Td>
+            {days.map((day) => {
+              const kind = wholeDayKind(day);
+              if (kind !== null) {
+                // One cell down all four periods, drawn in the first row only.
+                return index === 0 ? (
+                  <WholeDayCell key={day.date} day={day} kind={kind} />
+                ) : null;
+              }
+              const lessons = day.lessons.filter(
+                (lesson) => lesson.periodNo === period.no,
+              );
+              return (
+                <td
+                  key={day.date}
+                  className={`whitespace-normal border-b border-l border-line px-1 py-2 text-center align-middle text-[11px] leading-snug ${
+                    day.date === today ? "bg-[#f2f5ff]" : ""
+                  }`}
+                >
+                  <div className="flex flex-col gap-2.5">
+                    {lessons.map((lesson) => (
+                      <MonthLesson key={lesson.id} lesson={lesson} />
+                    ))}
+                  </div>
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </TableWrap>
+  );
+}
+
+/** A day with no lessons: 休み・行事 (written top to bottom), a weekend, or 未定. */
+function WholeDayCell({
+  day,
+  kind,
+}: {
+  day: TimetableDay;
+  kind: "closure" | "weekend" | "undecided";
+}) {
+  // No bottom border: the cell reaches the last row, whose edge the box draws.
+  const tone =
+    kind === "closure"
+      ? "bg-amber-soft text-amber-ink"
+      : kind === "weekend"
+        ? "bg-[#edf0f5]"
+        : "bg-[#f6f8fc] text-muted";
+  return (
+    <td
+      rowSpan={PERIODS.length}
+      className={`whitespace-normal border-l border-line px-0.5 py-3 text-center align-middle text-xs ${tone}`}
+    >
+      {kind === "closure" && (
+        <span
+          className={`${VERTICAL_TEXT} text-sm font-bold leading-tight tracking-[0.15em]`}
+        >
+          {day.closures.join("・")}
+        </span>
+      )}
+      {kind === "undecided" && (
+        <span className={`${VERTICAL_TEXT} tracking-[0.15em]`}>未定</span>
+      )}
+      {kind === "weekend" && <span className="sr-only">授業なし</span>}
+    </td>
+  );
+}
+
+/** One lesson in the month table: subject, room, then the teacher (or the class). */
+function MonthLesson({ lesson }: { lesson: LessonView }) {
+  const struck = lesson.cancelled ? "text-muted line-through" : "";
+  return (
+    <div>
+      <div className={`font-bold [overflow-wrap:anywhere] ${struck}`}>
+        {lesson.subject}
+      </div>
+      <div className={`font-semibold ${struck || "text-navy"}`}>
+        {roomText(lesson.room)}
+      </div>
+      <div className="text-muted [overflow-wrap:anywhere]">
+        {lesson.className ?? teacherText(lesson.teachers)}
+      </div>
+      {/* anywhere: 教室変更(602から変更) still fits a narrow column (portrait print). */}
+      <div className="mt-1 flex flex-wrap justify-center gap-1 [overflow-wrap:anywhere] empty:hidden">
+        <LessonBadges lesson={lesson} wrap />
+      </div>
+    </div>
   );
 }
 
@@ -710,21 +854,25 @@ export function TimetableView({
             active: mode === view,
           }))}
         />
+        {/* The month table from xl runs date by date, so 週の始まり only changes the
+            calendar below xl: from xl it is hidden in the month view. */}
         {showsWeeks && (
-          <Segmented
-            stretch
-            label="週の始まり"
-            items={(
-              [
-                ["mon", "月曜始まり"],
-                ["sun", "日曜始まり"],
-              ] as const
-            ).map(([start, label]) => ({
-              label,
-              href: hrefFor({ start }),
-              active: weekStart === start,
-            }))}
-          />
+          <div className={mode === "month" ? "contents xl:hidden" : "contents"}>
+            <Segmented
+              stretch
+              label="週の始まり"
+              items={(
+                [
+                  ["mon", "月曜始まり"],
+                  ["sun", "日曜始まり"],
+                ] as const
+              ).map(([start, label]) => ({
+                label,
+                href: hrefFor({ start }),
+                active: weekStart === start,
+              }))}
+            />
+          </div>
         )}
         <div className="grid w-full grid-cols-3 gap-1.5 sm:flex sm:w-auto sm:items-center">
           <LinkButton size="sm" href={hrefFor({ date: previous })}>

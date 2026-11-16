@@ -9,7 +9,10 @@ import {
   listClassesForYear,
   listClosuresForClass,
 } from "@/lib/server/queries/common";
-import { loadHomeLessons } from "@/lib/server/queries/lessons";
+import {
+  loadHomeLessons,
+  loadTimetableDays,
+} from "@/lib/server/queries/lessons";
 import { requireUser } from "@/lib/server/session";
 import { one } from "@/lib/url";
 
@@ -19,15 +22,20 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
   const params = await searchParams;
   const now = new Date();
   const today = schoolToday(now);
+  const minutes = schoolMinutes(now);
   const year = fiscalYearOfDate(today);
   const classes = await listClassesForYear(year);
   const requested = one(params.class);
   const selected = classes.find((item) => item.id === requested) ?? null;
-  const [closures, lessons] = await Promise.all([
+  const [closures, lessons, todayDays] = await Promise.all([
     listClosuresForClass(today, today, selected?.id ?? null),
     selected
-      ? loadHomeLessons(selected.id, today, schoolMinutes(now))
+      ? loadHomeLessons(selected.id, today, minutes)
       : ({ kind: "undecided" } as const),
+    // 今日の時間割: the same days as S03's day view, for the chosen class only.
+    selected
+      ? loadTimetableDays([today], { classId: selected.id, teacherId: null })
+      : [],
   ]);
 
   return (
@@ -39,6 +47,8 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
       yearChanged={one(params.notice) === "year-changed"}
       lessons={lessons}
       closures={closureNamesOn(today, closures)}
+      minutes={minutes}
+      todayTimetable={todayDays[0] ?? null}
     />
   );
 }
