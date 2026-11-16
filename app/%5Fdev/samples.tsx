@@ -745,6 +745,21 @@ export function sampleFor(
             data={data}
             showInactive={one(params.inactive) === "1"}
             basePath={base}
+            rooms={ROOMS.map((room) => ({ id: room.id, name: room.name }))}
+            linkChoices={
+              tab === "subjects"
+                ? {
+                    classes: CLASSES.map((item) => ({
+                      id: item.id,
+                      name: item.name,
+                    })),
+                    teachers: TEACHERS.map((item) => ({
+                      id: item.id,
+                      name: item.name,
+                    })),
+                  }
+                : undefined
+            }
           />
         ),
       };

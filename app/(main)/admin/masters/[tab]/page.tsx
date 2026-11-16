@@ -4,7 +4,11 @@ import { MastersView, type MasterTab } from "@/components/screens/admin-views";
 import { fiscalYearOfDate, schoolToday } from "@/lib/domain/school-date";
 import { noticeText } from "@/lib/notice";
 import { loadMaster } from "@/lib/server/queries/admin";
-import { loadRoomList } from "@/lib/server/queries/common";
+import {
+  listActiveTeachers,
+  listClassesForYear,
+  loadRoomList,
+} from "@/lib/server/queries/common";
 import { hasRole, requireUser } from "@/lib/server/session";
 import { one } from "@/lib/url";
 
@@ -36,14 +40,25 @@ export default async function MastersPage({
   if (!tab) notFound();
   const query = await searchParams;
   const showInactive = one(query.inactive) === "1";
-  // The rooms are only needed for the 教室 box of a class.
-  const rooms = tab === "classes" ? await loadRoomList() : [];
+  const year = fiscalYearOfDate(schoolToday(new Date()));
+  // The rooms are needed for the 教室 box of a class, and for the links of a new 教科.
+  const rooms =
+    tab === "classes" || tab === "subjects" ? await loadRoomList() : [];
+  // 教科の追加は、紐づけも一緒に入れられる: 今年度のクラスと、有効な講師から選ぶ。
+  const linkChoices =
+    tab === "subjects"
+      ? {
+          classes: await listClassesForYear(year),
+          teachers: await listActiveTeachers(),
+        }
+      : undefined;
   return (
     <MastersView
       data={await loadMaster(tab, showInactive)}
       showInactive={showInactive}
       rooms={rooms.map((room) => ({ id: room.id, name: room.name }))}
-      defaultYear={fiscalYearOfDate(schoolToday(new Date()))}
+      linkChoices={linkChoices}
+      defaultYear={year}
       notice={noticeText(one(query.notice))}
       renamed={one(query.renamed) === "1"}
       fixCount={count(one(query.fix))}

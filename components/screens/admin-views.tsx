@@ -25,7 +25,11 @@ import {
 } from "./link-editor";
 import { ClosureDeleteButton, ClosureEditButton } from "./closure-editor";
 import { DeleteButton } from "./delete-button";
-import { MasterActiveButton, MasterEditButton } from "./master-editor";
+import {
+  MasterActiveButton,
+  MasterEditButton,
+  type SubjectLinkChoices,
+} from "./master-editor";
 import {
   MonitorActiveButton,
   MonitorAddForm,
@@ -111,6 +115,7 @@ export function MastersView({
   showInactive,
   basePath = "/admin/masters",
   rooms = [],
+  linkChoices,
   defaultYear,
   notice,
   renamed = false,
@@ -122,6 +127,8 @@ export function MastersView({
   basePath?: string;
   /** Active rooms, for the 教室 box of a class */
   rooms?: { id: string; name: string }[];
+  /** 教科の追加で、一緒に紐づけるクラスと講師の候補 (教科のタブだけ) */
+  linkChoices?: SubjectLinkChoices;
   /** 開始年度の初期値: this school year */
   defaultYear: number;
   /** MI501 / MI502: what was just done */
@@ -142,6 +149,7 @@ export function MastersView({
             row={null}
             rooms={rooms}
             defaultYear={defaultYear}
+            linkChoices={linkChoices}
             variant="primary"
           >
             <Icon name="plus" size={16} />

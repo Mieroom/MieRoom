@@ -13,6 +13,7 @@ import {
 } from "@/lib/domain/school-date";
 import { MESSAGES } from "@/lib/messages";
 import { getDb } from "./db";
+import { inYear } from "./queries/common";
 import { loadExportSource } from "./queries/export";
 import { UUID } from "./reservations";
 
@@ -48,6 +49,102 @@ export async function countExportIssues(now: Date): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+/** 紐づけの「各担当」「教室未定」の行のキー (S22、取り込みと同じ)。 */
+const EACH_TEACHER = "each";
+const NO_ROOM = "none";
+/** 教科を追加するとき、一緒に紐づけるクラスの数の上限 (マスタの上限と同じ)。 */
+const MAX_LINK_CLASSES = 100;
+
+type SubjectLinks = { classIds: string[]; teacherKey: string; roomKey: string };
+
+/**
+ * 教科の追加と一緒に入れる紐づけ (S21): どのクラスが取るか、講師、教室。講師は「各担当」、
+ * 教室は「教室未定」の既定にできる。クラスを選ばなければ、紐づけは作らない (null)。
+ * 選べるのは、今年度に存在する有効なクラス、有効な講師・教室だけ (S22 と同じ)。
+ */
+async function parseSubjectLinks(
+  body: Record<string, unknown>,
+  now: Date,
+): Promise<
+  { ok: true; links: SubjectLinks | null } | { ok: false; errors: FieldError[] }
+> {
+  const raw = body.classIds;
+  if (raw === undefined || raw === null) return { ok: true, links: null };
+  const invalid: { ok: false; errors: FieldError[] } = {
+    ok: false,
+    errors: [{ field: "links", message: MESSAGES.ME706 }],
+  };
+  if (!Array.isArray(raw) || raw.length > MAX_LINK_CLASSES) return invalid;
+  const classIds = [...new Set(raw)];
+  if (classIds.length === 0) return { ok: true, links: null };
+  if (
+    !classIds.every(
+      (id): id is string => typeof id === "string" && UUID.test(id),
+    )
+  ) {
+    return invalid;
+  }
+  const teacherKey =
+    body.teacherId === undefined ? EACH_TEACHER : body.teacherId;
+  const roomKey = body.roomId === undefined ? NO_ROOM : body.roomId;
+  if (typeof teacherKey !== "string" || typeof roomKey !== "string")
+    return invalid;
+
+  const db = getDb();
+  const year = fiscalYearOfDate(schoolToday(now));
+  const [classes, teacher, room] = await Promise.all([
+    db.schoolClass.count({ where: { id: { in: classIds }, ...inYear(year) } }),
+    teacherKey === EACH_TEACHER
+      ? Promise.resolve(true)
+      : UUID.test(teacherKey)
+        ? db.teacher.findFirst({
+            where: { id: teacherKey, active: true },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
+    roomKey === NO_ROOM
+      ? Promise.resolve(true)
+      : UUID.test(roomKey)
+        ? db.room.findFirst({
+            where: { id: roomKey, active: true },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
+  ]);
+  if (classes !== classIds.length || !teacher || !room) return invalid;
+  return { ok: true, links: { classIds, teacherKey, roomKey } };
+}
+
+/** 教科を作り、選んだクラスへの紐づけ (クラスの教科、教科の講師、教科の教室) を、1回で書く。 */
+async function createSubjectWithLinks(name: string, links: SubjectLinks) {
+  await getDb().$transaction(async (tx) => {
+    const subject = await tx.subject.create({
+      data: { name },
+      select: { id: true },
+    });
+    const subjectId = subject.id;
+    await tx.classSubject.createMany({
+      data: links.classIds.map((classId) => ({ classId, subjectId })),
+    });
+    await tx.subjectTeacher.createMany({
+      data: links.classIds.map((classId) => ({
+        classId,
+        subjectId,
+        teacherId: links.teacherKey === EACH_TEACHER ? null : links.teacherKey,
+        teacherKey: links.teacherKey,
+      })),
+    });
+    await tx.subjectRoom.createMany({
+      data: links.classIds.map((classId) => ({
+        classId,
+        subjectId,
+        roomId: links.roomKey === NO_ROOM ? null : links.roomKey,
+        roomKey: links.roomKey,
+      })),
+    });
+  });
 }
 
 const parseVersion = (value: unknown): Date | null => {
@@ -157,13 +254,24 @@ export async function saveMaster(
       errors.push({ field: "homeRoomId", message: MESSAGES.ME706 });
     }
   }
+  // 教科の追加だけ、紐づけも一緒に入れられる (S21)。編集では使わない。
+  let subjectLinks: SubjectLinks | null = null;
+  if (kind === "subjects" && id === null) {
+    const links = await parseSubjectLinks(body, now);
+    if (!links.ok) errors.push(...links.errors);
+    else subjectLinks = links.links;
+  }
   if (errors.length > 0) return { kind: "invalid", errors };
 
   const today = textToDateColumn(schoolToday(now));
   try {
     let renamed = false;
     if (id === null) {
-      await create(kind, value);
+      if (subjectLinks) {
+        await createSubjectWithLinks(String(value.name), subjectLinks);
+      } else {
+        await create(kind, value);
+      }
     } else {
       const version = parseVersion(body.version);
       if (version === null) return { kind: "conflict" };

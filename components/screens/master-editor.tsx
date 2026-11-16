@@ -26,6 +26,12 @@ export type EditableRow = {
 
 type FieldErrors = Record<string, string>;
 
+/** 教科の追加と一緒に紐づけるときの、選べるもの (今年度のクラス、有効な講師)。 */
+export type SubjectLinkChoices = {
+  classes: { id: string; name: string }[];
+  teachers: { id: string; name: string }[];
+};
+
 async function send(
   endpoint: string,
   body: unknown,
@@ -120,18 +126,135 @@ function Text({
   );
 }
 
+// 教科の追加 (S21): 紐づけ (クラスの教科、教科の講師、教科の教室) を、一緒に入れる。
+// 選んだクラスすべてに、同じ講師と教室を入れる。クラスごとに変えるときは、あとで S22 で直す。
+function SubjectLinkFields({
+  choices,
+  rooms,
+  errors,
+}: {
+  choices: SubjectLinkChoices;
+  rooms: { id: string; name: string }[];
+  errors: FieldErrors;
+}) {
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const allChosen =
+    choices.classes.length > 0 && chosen.size === choices.classes.length;
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-lg border border-line p-3">
+      <legend className="px-1 text-xs font-semibold">
+        一緒に紐づける
+        <span className="ml-2 font-normal text-muted">任意</span>
+      </legend>
+      <p className="text-[11px] text-muted">
+        この教科を取るクラスを選ぶと、「クラスの教科」「教科の講師」「教科の教室」を、
+        まとめて入れます。選ばなければ、教科だけを追加します(紐づけは、あとから
+        S22 でも入れられます)。
+      </p>
+      {choices.classes.length === 0 ? (
+        <p className="text-[11px] text-muted">
+          今年度に存在する有効なクラスがありません。
+        </p>
+      ) : (
+        <>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold">
+              クラス(今年度)
+              <span className="ml-1.5 font-normal text-muted">
+                {chosen.size}/{choices.classes.length}
+              </span>
+            </span>
+            <Button
+              size="sm"
+              onClick={() =>
+                setChosen(
+                  allChosen
+                    ? new Set()
+                    : new Set(choices.classes.map((item) => item.id)),
+                )
+              }
+            >
+              {allChosen ? "すべて外す" : "すべて選ぶ"}
+            </Button>
+          </div>
+          <div className="grid max-h-40 grid-cols-1 gap-1.5 overflow-y-auto sm:grid-cols-2">
+            {choices.classes.map((item) => (
+              <label
+                key={item.id}
+                className="flex cursor-pointer items-center gap-2 rounded-md border border-line px-2.5 py-1.5 text-xs font-normal"
+              >
+                <input
+                  type="checkbox"
+                  name="linkClass"
+                  value={item.id}
+                  className="size-4 shrink-0 accent-brand"
+                  checked={chosen.has(item.id)}
+                  onChange={(event) => {
+                    const next = new Set(chosen);
+                    if (event.target.checked) next.add(item.id);
+                    else next.delete(item.id);
+                    setChosen(next);
+                  }}
+                />
+                <span className="min-w-0 truncate">{item.name}</span>
+              </label>
+            ))}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="講師(選んだクラスすべて)">
+              <select
+                name="linkTeacher"
+                defaultValue="each"
+                className={fieldClass}
+              >
+                <option value="each">各担当</option>
+                {choices.teachers.map((teacher) => (
+                  <option key={teacher.id} value={teacher.id}>
+                    {teacher.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="教室(選んだクラスすべて)">
+              <select
+                name="linkRoom"
+                defaultValue="none"
+                className={fieldClass}
+              >
+                <option value="none">ー(教室未定)</option>
+                {rooms.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {room.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        </>
+      )}
+      {errors.links && (
+        <p role="alert" className="text-[11px] text-red-ink">
+          {errors.links}
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
 function Fields({
   tab,
   row,
   rooms,
   errors,
   defaultYear,
+  linkChoices,
 }: {
   tab: Tab;
   row: EditableRow | null;
   rooms: { id: string; name: string }[];
   errors: FieldErrors;
   defaultYear: number;
+  linkChoices?: SubjectLinkChoices;
 }) {
   switch (tab) {
     case "classes":
@@ -200,13 +323,22 @@ function Fields({
       );
     case "subjects":
       return (
-        <Text
-          name="name"
-          label="教科名"
-          required
-          errors={errors}
-          defaultValue={row?.name}
-        />
+        <>
+          <Text
+            name="name"
+            label="教科名"
+            required
+            errors={errors}
+            defaultValue={row?.name}
+          />
+          {row === null && linkChoices && (
+            <SubjectLinkFields
+              choices={linkChoices}
+              rooms={rooms}
+              errors={errors}
+            />
+          )}
+        </>
       );
     case "rooms":
       return (
@@ -253,6 +385,7 @@ export function MasterEditButton({
   row,
   rooms,
   defaultYear,
+  linkChoices,
   variant = "default",
   children,
 }: {
@@ -260,6 +393,8 @@ export function MasterEditButton({
   row: EditableRow | null;
   rooms: { id: string; name: string }[];
   defaultYear: number;
+  /** 教科の追加のとき: 一緒に紐づける、クラスと講師の候補 */
+  linkChoices?: SubjectLinkChoices;
   variant?: "default" | "primary";
   children: ReactNode;
 }) {
@@ -287,7 +422,7 @@ export function MasterEditButton({
       <dialog
         ref={dialog}
         aria-label={row ? "編集" : "追加"}
-        className="m-auto w-[min(94vw,520px)] rounded-xl border border-line bg-white p-5 text-xs text-ink shadow-xl backdrop:bg-black/40"
+        className="m-auto max-h-[92vh] w-[min(94vw,520px)] overflow-y-auto rounded-xl border border-line bg-white p-5 text-xs text-ink shadow-xl backdrop:bg-black/40"
       >
         <form
           key={opened}
@@ -295,7 +430,20 @@ export function MasterEditButton({
           onSubmit={async (event) => {
             event.preventDefault();
             if (busy) return;
-            const form = Object.fromEntries(new FormData(event.currentTarget));
+            const data = new FormData(event.currentTarget);
+            const {
+              linkClass: _classes,
+              linkTeacher,
+              linkRoom,
+              ...form
+            } = Object.fromEntries(data);
+            void _classes;
+            // 教科の追加: 選んだクラスがあれば、紐づけも一緒に送る
+            const classIds = data.getAll("linkClass");
+            const links =
+              tab === "subjects" && !row && classIds.length > 0
+                ? { classIds, teacherId: linkTeacher, roomId: linkRoom }
+                : {};
             setBusy(true);
             setErrors({});
             setMessage(null);
@@ -303,6 +451,7 @@ export function MasterEditButton({
               kind: tab,
               ...(row ? { id: row.id, version: row.version } : {}),
               ...form,
+              ...links,
             });
             setBusy(false);
             if (answer.ok) {
@@ -321,6 +470,7 @@ export function MasterEditButton({
             rooms={rooms}
             errors={errors}
             defaultYear={defaultYear}
+            linkChoices={linkChoices}
           />
           {message && (
             <p role="alert" className="text-[11px] text-red-ink">
