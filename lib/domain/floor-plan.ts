@@ -108,7 +108,7 @@ export const FLOORS: readonly Floor[] = [
       { name: "601", points: rect(318.7, 0, 153.3, 100), kind: "room" },
       emerg,
       { name: "604", points: lower, kind: "room" },
-      { name: "倉庫", points: rect(173, 125, 85, 70), kind: "fac" },
+      { name: "倉庫", points: rect(174.6, 125, 83.4, 70), kind: "fac" },
       ...common,
       wc("m", 268, 72),
     ],
