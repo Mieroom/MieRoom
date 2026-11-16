@@ -84,7 +84,7 @@ export function AppShell({
       )}
       <aside
         aria-label="メインメニュー"
-        className={`fixed inset-y-0 left-0 z-40 flex w-[245px] flex-col overflow-hidden border-r border-line bg-white px-3 pt-5 transition-transform sm:sticky sm:top-0 sm:h-screen sm:w-auto sm:translate-x-0 sm:shadow-none lg:px-4 print:hidden ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-[245px] flex-col overflow-hidden border-r border-line bg-white px-3 pt-5 transition-transform sm:sticky sm:top-0 sm:h-dvh sm:w-auto sm:translate-x-0 sm:shadow-none lg:px-4 print:hidden ${
           menuOpen
             ? "translate-x-0 shadow-[10px_0_50px_#14246b24]"
             : "-translate-x-full"
@@ -166,62 +166,69 @@ export function AppShell({
             className="pointer-events-none sticky bottom-0 z-10 h-10 shrink-0 bg-linear-to-t from-white from-25%"
           />
         </div>
+        {/* Today, the role and ログアウト, under the menu and always in view (only the
+            menu above scrolls). On phones: at the bottom of the opened menu. pl-2 lines
+            up with the brand; no right padding, so the button lines up with the menu
+            items' right edge and 時間割管理者 still fits in the 190px menu. */}
+        <div className="shrink-0 border-t border-line pb-[max(0.75rem,env(safe-area-inset-bottom))] pl-2 pt-3">
+          <div className="whitespace-nowrap text-xs text-[#4a576c]">
+            {todayText}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            {/* The first letter only repeats the label next to it. */}
+            <span
+              aria-hidden="true"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e8ecff] text-xs font-bold text-navy"
+            >
+              {ROLE_LABEL[role][0]}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-xs">
+              {ROLE_LABEL[role]}
+            </span>
+            {!sampleScreenId && (
+              <>
+                <button
+                  type="button"
+                  aria-label="ログアウト"
+                  title="ログアウト"
+                  onClick={() => setConfirmSignOut(true)}
+                  className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-white hover:bg-[#f6f8fc]"
+                >
+                  <Icon name="logout" />
+                </button>
+                {/* showModal puts it in the top layer: the menu's transform and
+                    overflow do not clip it. */}
+                <ConfirmDialog
+                  open={confirmSignOut}
+                  message="ログアウトしますか?"
+                  confirmLabel="ログアウトする"
+                  cancelLabel="キャンセル"
+                  busy={signingOut}
+                  onYes={() => startSignOut(() => signOutAction())}
+                  onNo={() => setConfirmSignOut(false)}
+                />
+              </>
+            )}
+          </div>
+        </div>
       </aside>
 
       <div className="min-w-0">
-        {/* The inner box matches <main> (same max width and padding), so the header
-            lines up with the content on wide screens. */}
-        <header className="border-b border-line bg-white print:hidden">
-          <div className="mx-auto flex h-14 max-w-[1490px] items-center justify-between gap-4 px-4 sm:h-16 sm:px-8">
-            <div className="flex min-w-0 items-center gap-3">
-              <button
-                type="button"
-                aria-label="メニューを開く"
-                aria-expanded={menuOpen}
-                className="inline-grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line bg-white hover:bg-[#f6f8fc] sm:hidden"
-                onClick={() => setMenuOpen(true)}
-              >
-                <Icon name="menu" />
-              </button>
-              <div className="truncate text-sm font-semibold text-ink">
-                {current?.label ?? "ミエルーム"}
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-3">
-              <div className="hidden whitespace-nowrap text-xs text-[#4a576c] sm:block">
-                {todayText}
-              </div>
-              <div className="flex items-center gap-2 sm:border-l sm:border-line sm:pl-3">
-                <span className="grid h-[30px] w-[30px] place-items-center rounded-full bg-[#e8ecff] text-xs font-bold text-navy sm:h-[34px] sm:w-[34px]">
-                  {ROLE_LABEL[role][0]}
-                </span>
-                <span className="hidden whitespace-nowrap text-xs md:block">
-                  {ROLE_LABEL[role]}
-                </span>
-              </div>
-              {!sampleScreenId && (
-                <>
-                  <button
-                    type="button"
-                    aria-label="ログアウト"
-                    title="ログアウト"
-                    onClick={() => setConfirmSignOut(true)}
-                    className="inline-grid h-10 w-10 place-items-center rounded-lg border border-line bg-white hover:bg-[#f6f8fc]"
-                  >
-                    <Icon name="logout" />
-                  </button>
-                  <ConfirmDialog
-                    open={confirmSignOut}
-                    message="ログアウトしますか?"
-                    confirmLabel="ログアウトする"
-                    cancelLabel="キャンセル"
-                    busy={signingOut}
-                    onYes={() => startSignOut(() => signOutAction())}
-                    onNo={() => setConfirmSignOut(false)}
-                  />
-                </>
-              )}
-            </div>
+        {/* Phones only: the button that opens the menu, and the screen's name. From sm
+            the menu is always in view and today, the role and ログアウト sit under it,
+            so there is no band. */}
+        <header className="flex h-14 items-center gap-3 border-b border-line bg-white px-4 sm:hidden print:hidden">
+          <button
+            type="button"
+            aria-label="メニューを開く"
+            aria-expanded={menuOpen}
+            className="inline-grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line bg-white hover:bg-[#f6f8fc]"
+            onClick={() => setMenuOpen(true)}
+          >
+            <Icon name="menu" />
+          </button>
+          <div className="truncate text-sm font-semibold text-ink">
+            {current?.label ?? "ミエルーム"}
           </div>
         </header>
         <main className="mx-auto max-w-[1490px] px-4 pb-10 pt-6 sm:px-8 sm:pt-8 print:p-0">
