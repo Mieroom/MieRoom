@@ -352,12 +352,15 @@ function PlainRoom({ room, uid }: { room: PlanRoom; uid: string }) {
           [...room.name].map((char, i, all) => (
             <Text
               key={i}
-              x={cx}
+              // 非常階段は、右と下が外の壁 (太い線) に接する。壁と枠線にかからないよう、
+              // 文字を少し左上へ寄せ、行の間を詰める。
+              x={cx - (room.kind === "emerg" ? 3 : 0)}
               y={
-                cy +
+                cy -
+                (room.kind === "emerg" ? 3 : 0) +
                 (i - (all.length - 1) / 2) *
                   VERTICAL_SIZE[room.kind === "emerg" ? 1 : 0] *
-                  1.15
+                  (room.kind === "emerg" ? 1.02 : 1.15)
               }
               size={VERTICAL_SIZE[room.kind === "emerg" ? 1 : 0]}
               fill={style.text}
