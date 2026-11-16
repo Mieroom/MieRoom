@@ -152,11 +152,6 @@ function SubjectLinkFields({
         一緒に紐づける
         <span className="ml-2 font-normal text-muted">任意</span>
       </legend>
-      <p className="text-[11px] text-muted">
-        この教科を取るクラスを選ぶと、「クラスの教科」「教科の講師」「教科の教室」を、
-        まとめて入れます。選ばなければ、教科だけを追加します(紐づけは、あとから
-        S22 でも入れられます)。
-      </p>
       {choices.classes.length === 0 ? (
         <p className="text-[11px] text-muted">
           今年度に存在する有効なクラスがありません。
@@ -183,11 +178,11 @@ function SubjectLinkFields({
               {allChosen ? "すべて外す" : "すべて選ぶ"}
             </Button>
           </div>
-          <div className="grid max-h-40 grid-cols-1 gap-1.5 overflow-y-auto sm:grid-cols-2">
+          <div className="grid max-h-[50vh] grid-cols-1 gap-1.5 overflow-y-auto sm:grid-cols-2">
             {choices.classes.map((item) => (
               <label
                 key={item.id}
-                className="flex cursor-pointer items-center gap-2 rounded-md border border-line px-2.5 py-1.5 text-xs font-normal"
+                className="flex cursor-pointer items-center gap-2 rounded-md border border-line px-3 py-2 text-sm font-normal"
               >
                 <input
                   type="checkbox"
@@ -267,11 +262,6 @@ function ClassLinkFields({
         一緒に紐づける
         <span className="ml-2 font-normal text-muted">任意</span>
       </legend>
-      <p className="text-[11px] text-muted">
-        このクラスが取る教科を選ぶと、教科ごとの講師・教室を、まとめて入れます。
-        選ばなければ、クラスだけを追加します(紐づけは、あとから S22
-        でも入れられます)。
-      </p>
       {choices.subjects.length === 0 ? (
         <p className="text-[11px] text-muted">有効な教科がありません。</p>
       ) : (
@@ -296,7 +286,7 @@ function ClassLinkFields({
               {allChosen ? "すべて外す" : "すべて選ぶ"}
             </Button>
           </div>
-          <div className="flex max-h-56 flex-col gap-1.5 overflow-y-auto">
+          <div className="flex max-h-[55vh] flex-col gap-1.5 overflow-y-auto">
             {choices.subjects.map((item) => {
               const on = chosen.has(item.id);
               return (
@@ -304,7 +294,7 @@ function ClassLinkFields({
                   key={item.id}
                   className="flex flex-col gap-2 rounded-md border border-line px-2.5 py-1.5"
                 >
-                  <label className="flex cursor-pointer items-center gap-2 text-xs font-normal">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm font-normal">
                     <input
                       type="checkbox"
                       name="clsSubject"
@@ -537,6 +527,8 @@ export function MasterEditButton({
   const done = useDone();
   const dialog = useRef<HTMLDialogElement>(null);
   const [opened, setOpened] = useState(0);
+  // 紐づけを一緒に入れる追加の窓は、広く表示する
+  const wide = !row && Boolean(linkChoices || classLinkChoices);
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [message, setMessage] = useState<string | null>(null);
@@ -558,7 +550,7 @@ export function MasterEditButton({
       <dialog
         ref={dialog}
         aria-label={row ? "編集" : "追加"}
-        className="m-auto max-h-[92vh] w-[min(94vw,520px)] overflow-y-auto rounded-xl border border-line bg-white p-5 text-xs text-ink shadow-xl backdrop:bg-black/40"
+        className={`m-auto max-h-[92vh] ${wide ? "w-[min(96vw,760px)]" : "w-[min(94vw,520px)]"} overflow-y-auto rounded-xl border border-line bg-white p-5 text-xs text-ink shadow-xl backdrop:bg-black/40`}
       >
         <form
           key={opened}
