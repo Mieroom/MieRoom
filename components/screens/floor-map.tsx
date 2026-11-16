@@ -76,6 +76,57 @@ const scaled = (points: readonly Pt[]): Pt[] =>
 const pointsText = (points: readonly Pt[]) =>
   points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
 
+// 枠線の太さ。部屋・階段・EV・トイレなど、すべて同じにする。
+const LINE = 2;
+
+/**
+ * 塗りと枠線。枠線は、部屋の内側に引く (部屋の形で切り取る)。隣り合う部屋の線が、境目で
+ * 重ならず、同じ太さで、並んで見える。openTop: 上の辺の線を引かない (上の部屋につながる)。
+ */
+function Outlined({
+  uid,
+  points,
+  fill,
+  stroke,
+  dash,
+  openTop,
+}: {
+  uid: string;
+  points: readonly Pt[];
+  fill: string;
+  stroke: string;
+  dash?: string;
+  openTop?: boolean;
+}) {
+  const clip = `monitor-room-${uid}`;
+  return (
+    <>
+      <clipPath id={clip}>
+        <polygon points={pointsText(points)} />
+      </clipPath>
+      <polygon points={pointsText(points)} fill={fill} />
+      {openTop ? (
+        <polyline
+          points={pointsText([points[1], points[2], points[3], points[0]])}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={LINE * 2}
+          clipPath={`url(#${clip})`}
+        />
+      ) : (
+        <polygon
+          points={pointsText(points)}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={LINE * 2}
+          strokeDasharray={dash}
+          clipPath={`url(#${clip})`}
+        />
+      )}
+    </>
+  );
+}
+
 function Text({
   x,
   y,
@@ -106,7 +157,7 @@ function Text({
   );
 }
 
-function Toilet({ room }: { room: PlanRoom }) {
+function Toilet({ room, uid }: { room: PlanRoom; uid: string }) {
   const style = TOILET[room.gender ?? "m"];
   const points = scaled(room.points);
   const [cx, cy] = centroid(points);
@@ -117,11 +168,11 @@ function Toilet({ room }: { room: PlanRoom }) {
     `${(x + dx * k).toFixed(1)},${(y + dy * k).toFixed(1)}`;
   return (
     <>
-      <polygon
-        points={pointsText(points)}
+      <Outlined
+        uid={uid}
+        points={points}
         fill={style.fill}
         stroke={style.stroke}
-        strokeWidth={2}
       />
       <circle cx={x} cy={y - 14 * k} r={6.5 * k} fill={style.ink} />
       {room.gender === "m" && (
@@ -167,9 +218,11 @@ function Toilet({ room }: { room: PlanRoom }) {
 function StatusRoom({
   room,
   state,
+  uid,
 }: {
   room: PlanRoom;
   state: RoomState | undefined;
+  uid: string;
 }) {
   const points = scaled(room.points);
   const [cx, cy] = centroid(points);
@@ -187,12 +240,12 @@ function StatusRoom({
     const layout = lessonLayout(points, [cx, cy], room.name, state);
     return (
       <>
-        <polygon
-          points={pointsText(points)}
+        <Outlined
+          uid={uid}
+          points={points}
           fill={style.fill}
           stroke={style.stroke}
-          strokeWidth={isNext ? 3 : 2.5}
-          strokeDasharray={isNext ? "9 5" : undefined}
+          dash={isNext ? "9 5" : undefined}
         />
         {isNext && (
           <>
@@ -241,11 +294,11 @@ function StatusRoom({
           : "使用止め";
   return (
     <>
-      <polygon
-        points={pointsText(points)}
+      <Outlined
+        uid={uid}
+        points={points}
         fill={style.fill}
         stroke={style.stroke}
-        strokeWidth={2.5}
       />
       <Text
         x={cx}
@@ -265,7 +318,7 @@ function StatusRoom({
   );
 }
 
-function PlainRoom({ room }: { room: PlanRoom }) {
+function PlainRoom({ room, uid }: { room: PlanRoom; uid: string }) {
   const style =
     room.kind === "office"
       ? OFFICE
@@ -284,22 +337,15 @@ function PlainRoom({ room }: { room: PlanRoom }) {
   const size = room.small ? FONT.small : FONT.name;
   return (
     <>
-      <polygon
-        points={pointsText(points)}
+      {/* attachTop: 上の辺は、上の部屋との境目なので、線を引かない (右・下・左だけ) */}
+      <Outlined
+        uid={uid}
+        points={points}
         fill={style.fill}
-        stroke={room.attachTop ? "none" : style.stroke}
-        strokeWidth={1.5}
-        strokeDasharray={room.kind === "open" ? "6 5" : undefined}
+        stroke={style.stroke}
+        dash={room.kind === "open" ? "6 5" : undefined}
+        openTop={room.attachTop}
       />
-      {room.attachTop && (
-        // 上の辺は、上の部屋との境目なので、線を引かない (右・下・左だけ)
-        <polyline
-          points={pointsText([points[1], points[2], points[3], points[0]])}
-          fill="none"
-          stroke={style.stroke}
-          strokeWidth={1.5}
-        />
-      )}
       {room.name !== "" &&
         (room.vertical ? (
           // 縦書き: 文字を立てたまま、上から下へ 1 文字ずつ並べる
@@ -377,11 +423,18 @@ function FloorPanel({
           {floor.rooms.map((room, i) => {
             if (room.kind === "room") {
               return (
-                <StatusRoom key={i} room={room} state={states[room.name]} />
+                <StatusRoom
+                  key={i}
+                  uid={`${floor.id}-${i}`}
+                  room={room}
+                  state={states[room.name]}
+                />
               );
             }
-            if (room.kind === "wc") return <Toilet key={i} room={room} />;
-            return <PlainRoom key={i} room={room} />;
+            if (room.kind === "wc") {
+              return <Toilet key={i} uid={`${floor.id}-${i}`} room={room} />;
+            }
+            return <PlainRoom key={i} uid={`${floor.id}-${i}`} room={room} />;
           })}
         </g>
         <polygon
