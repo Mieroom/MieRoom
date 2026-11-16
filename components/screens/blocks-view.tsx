@@ -61,7 +61,7 @@ export function BlocksView({
   overlaps?: { reservations: number; lessons: number } | null;
 }) {
   return (
-    <div className="max-w-4xl">
+    <div className="mx-auto max-w-4xl">
       <PageHeading title="使用止め" />
       {notice && (
         <Callout icon="check" className="mb-3" key={notice}>

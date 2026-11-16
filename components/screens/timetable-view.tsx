@@ -799,7 +799,7 @@ export function TimetableView({
             stays close to its lesson. The banner and callouts span the full width, like
             the filter bar above and the week and month views. */}
       {mode === "day" && days[0] && (
-        <div className="max-w-4xl">
+        <div className="mx-auto max-w-4xl">
           <DayView
             day={days[0]}
             today={today}

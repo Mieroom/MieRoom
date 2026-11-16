@@ -56,7 +56,7 @@ export function ReservationFormView({
   // The heading, the notice and both cards share one readable width (about 900px), so
   // the labels, the slots and the submit button stay close together on wide screens.
   return (
-    <div className="max-w-4xl">
+    <div className="mx-auto max-w-4xl">
       <PageHeading title={mode === "apply" ? "予約の申請" : "代理入力"} />
 
       <Card className="mb-4 p-5 sm:p-6">

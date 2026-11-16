@@ -107,7 +107,7 @@ export function LessonChangeView({
   // edges line up and the select and the checkboxes do not stretch on very wide
   // screens. The read-only card keeps its own height (lg:self-start).
   return (
-    <div className="max-w-6xl">
+    <div className="mx-auto max-w-6xl">
       <PageHeading
         title="授業の変更"
         actions={
@@ -222,7 +222,7 @@ export function LessonAddView({
   // The heading, the notice and the form share one width, so the back button lines
   // up with the form's right edge.
   return (
-    <div className="max-w-4xl">
+    <div className="mx-auto max-w-4xl">
       <PageHeading
         title="授業を足す(補講)"
         actions={
