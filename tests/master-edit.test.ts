@@ -95,19 +95,12 @@ describe("教室の規則", () => {
 });
 
 describe("講師の規則", () => {
-  it("表記とメール。メールは小文字にそろえる。空欄は null", () => {
+  it("表記だけ (前後の空白は取る)。メールは受け取らない", () => {
     expect(
-      parseTeacher({ displayName: " 田村 ", email: " Tamura@Example.JP " }),
-    ).toEqual({
-      ok: true,
-      value: { displayName: "田村", email: "tamura@example.jp" },
-    });
-    expect(parseTeacher({ displayName: "田村", email: "" })).toMatchObject({
-      ok: true,
-      value: { email: null },
-    });
+      parseTeacher({ displayName: " 田村 ", email: "Tamura@Example.JP" }),
+    ).toEqual({ ok: true, value: { displayName: "田村" } });
   });
-  it("「各担当」「外部講師」「、」は不可。20文字まで。メールの形", () => {
+  it("「各担当」「外部講師」「、」は不可。20文字まで", () => {
     const messages = (raw: unknown) => {
       const result = parseTeacher(raw);
       return result.ok ? [] : result.errors.map((e) => e.message);
@@ -119,12 +112,6 @@ describe("講師の規則", () => {
       MESSAGES.ME504(20),
     ]);
     expect(messages({ displayName: "" })).toEqual([MESSAGES.ME501]);
-    expect(messages({ displayName: "田村", email: "not-an-email" })).toEqual([
-      MESSAGES.ME516,
-    ]);
-    expect(messages({ displayName: "田村", email: "a@b.c d" })).toEqual([
-      MESSAGES.ME516,
-    ]);
   });
 });
 
@@ -244,21 +231,16 @@ describe("saveMaster", () => {
     });
   });
 
-  it("講師のメールの重複は ME507、表記の重複は ME502", async () => {
-    db.teacher.findFirst.mockImplementation(
-      ({ where }: { where: Record<string, unknown> }) =>
-        Promise.resolve("email" in where ? { id: "x" } : null),
-    );
-    expect(
-      await saveMaster(
-        "teachers",
-        { displayName: "田村", email: "t@example.jp" },
-        NOW,
-      ),
-    ).toEqual({
+  it("講師の表記の重複は ME502 (メールの重複確認はしない)", async () => {
+    db.teacher.findFirst.mockResolvedValue({ id: "x" });
+    expect(await saveMaster("teachers", { displayName: "田村" }, NOW)).toEqual({
       kind: "invalid",
-      errors: [{ field: "email", message: MESSAGES.ME507 }],
+      errors: [{ field: "displayName", message: MESSAGES.ME502 }],
     });
+    expect(db.teacher.findFirst.mock.calls[0][0].where).toMatchObject({
+      displayName: "田村",
+    });
+    expect("email" in db.teacher.findFirst.mock.calls[0][0].where).toBe(false);
   });
 
   it("クラスのホームルーム教室は、有効な教室だけ(ME706)", async () => {

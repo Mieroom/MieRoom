@@ -30,7 +30,11 @@ vi.mock("@/lib/server/db", async () => {
   return { getDb: () => testDb() };
 });
 vi.mock("@/lib/server/env", () => ({
-  getEnv: () => ({ INITIAL_ADMIN_EMAIL: "", STUDENT_EMAIL_PATTERN: null }),
+  getEnv: () => ({
+    INITIAL_ADMIN_EMAIL: "",
+    // 学生の形: テストの「学生」2人だけが生徒 (先生・管理者のメールは、この形に合わない)
+    STUDENT_EMAIL_PATTERN: /^(?:u-student|u-other-student)$/,
+  }),
 }));
 
 import { POST as proxy } from "@/app/(main)/teacher/reservations/proxy/route";
@@ -180,16 +184,16 @@ describe("登録済みの生徒を選ぶ", () => {
 
   it("T-PRX-012 先生・管理者・先生本人・いない人は選べない (ME521)。何も保存しない", async () => {
     const db = testDb();
-    // 先生は、講師マスタのメールと一致する人 (先生の判定)
-    await db.teacher.update({
-      where: { id: ID.teacher },
-      data: { email: `${USERS.otherStudent.id}@school.example` },
+    // 学生の形に合わないメールの人は、先生 (先生の判定)
+    await db.user.update({
+      where: { id: USERS.otherStudent.id },
+      data: { email: "tanaka@school.example" },
     });
     await db.adminEmail.create({
       data: { email: `${USERS.admin.id}@school.example` },
     });
     for (const id of [
-      USERS.otherStudent.id, // 講師マスタのメール = 先生
+      USERS.otherStudent.id, // 学生の形に合わないメール = 先生
       USERS.admin.id, // 管理者
       USERS.teacher.id, // 先生本人
       "nobody",
@@ -211,9 +215,9 @@ describe("登録済みの生徒を選ぶ", () => {
 describe("依頼者の検索", () => {
   it("T-PRX-020 名前に含む生徒だけが、ID と名前で出る。先生・管理者は出ない。メールは出ない", async () => {
     const db = testDb();
-    await db.teacher.update({
-      where: { id: ID.teacher },
-      data: { email: `${USERS.otherStudent.id}@school.example` },
+    await db.user.update({
+      where: { id: USERS.otherStudent.id },
+      data: { email: "tanaka@school.example" },
     });
     const response = await search(
       post("/teacher/reservations/requesters", { q: "学生" }),
@@ -221,7 +225,7 @@ describe("依頼者の検索", () => {
     expect(response.status).toBe(200);
     const text = await response.text();
     const body = JSON.parse(text) as { people: { id: string; name: string }[] };
-    // 「学生 一郎」(生徒)。「学生 二郎」は講師マスタのメールと一致 = 先生
+    // 「学生 一郎」(生徒)。「学生 二郎」は学生の形に合わないメール = 先生
     expect(body.people).toEqual([
       { id: USERS.student.id, name: USERS.student.name },
     ]);

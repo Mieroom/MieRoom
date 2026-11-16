@@ -284,7 +284,6 @@ const MASTER_DATA: Record<MasterTab, MasterData> = {
     rows: TEACHERS.map((item, index) => ({
       id: item.id,
       name: item.name,
-      email: null,
       tagId: index === 5 ? "12" : null,
       active: index !== 3,
       version: "2026-11-01T00:00:00.000Z",

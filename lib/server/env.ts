@@ -58,14 +58,13 @@ const schema = z.object({
       "must be at least 32 characters",
     ),
   ALLOWED_GATEWAY_ID: z.string().max(64).optional().default(""),
-  // Optional. The shape of a student's e-mail before "@" (e.g. [0-9]{6}).
-  // Unset: only the teacher list makes a teacher.
+  // Required. The shape of a student's e-mail before "@" (e.g. [0-9]{6}): a match is a
+  // student, every other school account is a teacher. Unset: the app stops with an error,
+  // so a missing value can never turn every teacher into a student.
   STUDENT_EMAIL_PATTERN: z
     .string()
-    .optional()
-    .default("")
     .refine(
-      isValidStudentPattern,
+      (value) => value.trim() !== "" && isValidStudentPattern(value),
       "must be a valid pattern of at most 100 characters",
     ),
 });
@@ -81,8 +80,7 @@ export type ServerEnv = Omit<
   /** What Better Auth puts in the Microsoft login address: one tenant, or "organizations". */
   MICROSOFT_AUTHORITY: string;
   ALLOWED_EMAIL_DOMAINS: string[];
-  /** null: not configured, so the teacher list decides. */
-  STUDENT_EMAIL_PATTERN: RegExp | null;
+  STUDENT_EMAIL_PATTERN: RegExp;
 };
 
 let cached: ServerEnv | undefined;
@@ -110,9 +108,10 @@ export function getEnv(): ServerEnv {
     MICROSOFT_AUTHORITY:
       listed.length > 0 ? "organizations" : parsed.data.MICROSOFT_TENANT_ID,
     ALLOWED_EMAIL_DOMAINS: parseDomainList(parsed.data.ALLOWED_EMAIL_DOMAINS),
+    // compileStudentPattern returns null only for an empty value, which the schema refuses.
     STUDENT_EMAIL_PATTERN: compileStudentPattern(
       parsed.data.STUDENT_EMAIL_PATTERN,
-    ),
+    ) as RegExp,
   };
   return cached;
 }

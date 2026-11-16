@@ -140,18 +140,16 @@ export function compileStudentPattern(
 /**
  * Admin > teacher > student, judged from the verified e-mail on every request.
  *
- * With a student pattern: an address that fits it is a student, every other
- * school address is a teacher, and the student number can never be promoted
- * (by the teacher list). Admins are never made automatically: only
- * INITIAL_ADMIN_EMAIL and the registered admins.
- * Without a pattern: only the active teacher list makes a teacher.
+ * An address whose part before "@" fits the student pattern is a student; every
+ * other school address (it already passed the tenant and domain checks) is a
+ * teacher. Admins are never made automatically: only INITIAL_ADMIN_EMAIL and
+ * the registered admins.
  */
 export function determineRole(input: {
   email: string;
   initialAdminEmail: string;
   adminEmails: string[];
-  activeTeacherEmails: string[];
-  studentEmailPattern?: RegExp | null;
+  studentEmailPattern: RegExp;
 }): Role {
   const email = normalizeEmail(input.email);
   if (email === "") return "student";
@@ -160,18 +158,8 @@ export function determineRole(input: {
   if (input.adminEmails.some((item) => normalizeEmail(item) === email))
     return "admin";
 
-  const pattern = input.studentEmailPattern;
-  if (pattern) {
-    const localPart = email.split("@")[0];
-    return pattern.test(localPart) ? "student" : "teacher";
-  }
-
-  if (
-    input.activeTeacherEmails.some((item) => normalizeEmail(item) === email)
-  ) {
-    return "teacher";
-  }
-  return "student";
+  const localPart = email.split("@")[0];
+  return input.studentEmailPattern.test(localPart) ? "student" : "teacher";
 }
 
 /** Only same-site paths are allowed as a place to return to after login. */

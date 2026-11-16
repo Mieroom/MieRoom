@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { MESSAGES } from "@/lib/messages";
 import { clean } from "./access";
 
@@ -94,15 +93,12 @@ export function parseRoom(raw: unknown): Parsed<RoomInput> {
 
 // ---------------------------------------------------------------- 講師
 
-export type TeacherInput = { displayName: string; email: string | null };
-
-const emailSchema = z.string().email().max(254);
+export type TeacherInput = { displayName: string };
 
 export function parseTeacher(raw: unknown): Parsed<TeacherInput> {
   const input = record(raw);
   const errors: FieldError[] = [];
   const displayName = text(input.displayName);
-  const email = text(input.email).toLowerCase();
   required(errors, "displayName", displayName, 20);
   if (FORBIDDEN_TEACHER_NAMES.includes(displayName)) {
     errors.push({ field: "displayName", message: MESSAGES.ME503 });
@@ -111,13 +107,7 @@ export function parseTeacher(raw: unknown): Parsed<TeacherInput> {
   if (displayName.includes("、")) {
     errors.push({ field: "displayName", message: MESSAGES.ME515 });
   }
-  if (email !== "" && !emailSchema.safeParse(email).success) {
-    errors.push({ field: "email", message: MESSAGES.ME516 });
-  }
-  return finish(errors, () => ({
-    displayName,
-    email: email === "" ? null : email,
-  }));
+  return finish(errors, () => ({ displayName }));
 }
 
 // ---------------------------------------------------------------- 教科

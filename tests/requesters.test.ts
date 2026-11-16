@@ -13,13 +13,12 @@ vi.mock("server-only", () => ({}));
 const db = vi.hoisted(() => ({
   user: { findMany: vi.fn(), findUnique: vi.fn() },
   adminEmail: { findMany: vi.fn() },
-  teacher: { findMany: vi.fn() },
 }));
 vi.mock("@/lib/server/db", () => ({ getDb: () => db }));
 const env = vi.hoisted(() => ({
   value: {
     INITIAL_ADMIN_EMAIL: "boss@school.example",
-    STUDENT_EMAIL_PATTERN: null as RegExp | null,
+    STUDENT_EMAIL_PATTERN: /^(?:[0-9]{6})$/ as RegExp,
   },
 }));
 vi.mock("@/lib/server/env", () => ({ getEnv: () => env.value }));
@@ -137,12 +136,11 @@ describe("生徒の検索 (searchRequesters)", () => {
     vi.clearAllMocks();
     env.value = {
       INITIAL_ADMIN_EMAIL: "boss@school.example",
-      STUDENT_EMAIL_PATTERN: null,
+      STUDENT_EMAIL_PATTERN: /^(?:[0-9]{6})$/,
     };
     db.adminEmail.findMany.mockResolvedValue([
       { email: "admin@school.example" },
     ]);
-    db.teacher.findMany.mockResolvedValue([{ email: "tamura@school.example" }]);
   });
 
   it("短いことば・形の違うことばは、DB に問い合わせずに空", async () => {
@@ -177,13 +175,13 @@ describe("生徒の検索 (searchRequesters)", () => {
       Array.from({ length: 30 }, (_, i) => ({
         id: `u${i}`,
         name: `山田${i}`,
-        email: `23${i}@school.example`,
+        email: `${230000 + i}@school.example`,
       })),
     );
     expect(await searchRequesters("山田", "t1")).toHaveLength(10);
   });
 
-  it("学生の形 (STUDENT_EMAIL_PATTERN) があるときは、その形に合う人だけが生徒", async () => {
+  it("学生の形 (STUDENT_EMAIL_PATTERN) に合う人だけが生徒 (管理者の指定がなくても、それ以外は先生)", async () => {
     env.value = {
       INITIAL_ADMIN_EMAIL: "",
       STUDENT_EMAIL_PATTERN: /^\d{6}$/,
@@ -203,10 +201,9 @@ describe("選んだ生徒の確認 (findSelectableStudent)", () => {
     vi.clearAllMocks();
     env.value = {
       INITIAL_ADMIN_EMAIL: "boss@school.example",
-      STUDENT_EMAIL_PATTERN: null,
+      STUDENT_EMAIL_PATTERN: /^(?:[0-9]{6})$/,
     };
     db.adminEmail.findMany.mockResolvedValue([]);
-    db.teacher.findMany.mockResolvedValue([{ email: "tamura@school.example" }]);
   });
 
   it("いる生徒なら、ID と名前だけを返す", async () => {
@@ -254,9 +251,11 @@ describe("依頼者の検索の入り口 (先生だけ)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => {});
-    env.value = { INITIAL_ADMIN_EMAIL: "", STUDENT_EMAIL_PATTERN: null };
+    env.value = {
+      INITIAL_ADMIN_EMAIL: "",
+      STUDENT_EMAIL_PATTERN: /^(?:[0-9]{6})$/,
+    };
     db.adminEmail.findMany.mockResolvedValue([]);
-    db.teacher.findMany.mockResolvedValue([]);
     db.user.findMany.mockResolvedValue([
       { id: "u1", name: "山田 太郎", email: "234001@school.example" },
     ]);

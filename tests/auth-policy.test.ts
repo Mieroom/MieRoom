@@ -217,34 +217,27 @@ describe("determineRole", () => {
   const base = {
     initialAdminEmail: "root@school.onmicrosoft.com",
     adminEmails: ["boss@school.onmicrosoft.com"],
-    activeTeacherEmails: ["teacher@school.onmicrosoft.com"],
+    studentEmailPattern: /^(?:[0-9]{6})$/,
   };
 
-  it("is student by default", () => {
-    expect(determineRole({ ...base, email: "s@school.onmicrosoft.com" })).toBe(
-      "student",
-    );
+  it("is student for a six-digit number", () => {
+    expect(
+      determineRole({ ...base, email: "123456@school.onmicrosoft.com" }),
+    ).toBe("student");
   });
 
-  it("is teacher for an active teacher email", () => {
+  it("is teacher for any other school account", () => {
     expect(
       determineRole({ ...base, email: "Teacher@school.onmicrosoft.com" }),
     ).toBe("teacher");
   });
 
-  it("is admin for the initial admin and for registered admins, even if also a teacher", () => {
+  it("is admin for the initial admin and for registered admins", () => {
     expect(
       determineRole({ ...base, email: "root@school.onmicrosoft.com" }),
     ).toBe("admin");
     expect(
       determineRole({ ...base, email: "boss@school.onmicrosoft.com" }),
-    ).toBe("admin");
-    expect(
-      determineRole({
-        ...base,
-        email: "boss@school.onmicrosoft.com",
-        activeTeacherEmails: ["boss@school.onmicrosoft.com"],
-      }),
     ).toBe("admin");
   });
 
@@ -374,8 +367,7 @@ describe("determineRole with a student e-mail pattern", () => {
   const base = {
     initialAdminEmail: "root@school.onmicrosoft.com",
     adminEmails: ["boss@school.onmicrosoft.com"],
-    activeTeacherEmails: [] as string[],
-    studentEmailPattern: pattern,
+    studentEmailPattern: pattern as RegExp,
   };
 
   it("a six-digit student number is a student", () => {
@@ -384,7 +376,7 @@ describe("determineRole with a student e-mail pattern", () => {
     ).toBe("student");
   });
 
-  it("everything else is a teacher, without being in the teacher list", () => {
+  it("everything else is a teacher, with no registration needed", () => {
     expect(
       determineRole({ ...base, email: "tanaka@school.onmicrosoft.com" }),
     ).toBe("teacher");
@@ -411,32 +403,8 @@ describe("determineRole with a student e-mail pattern", () => {
     ).not.toBe("admin");
   });
 
-  it("a student number is never promoted, even if it is in the teacher list or the admin list is empty", () => {
-    expect(
-      determineRole({
-        ...base,
-        email: "123456@school.onmicrosoft.com",
-        activeTeacherEmails: ["123456@school.onmicrosoft.com"],
-      }),
-    ).toBe("student");
-  });
-
   it("an empty e-mail is a student (the lowest role)", () => {
     expect(determineRole({ ...base, email: "" })).toBe("student");
-  });
-
-  it("without a pattern the teacher list decides, as before", () => {
-    const off = { ...base, studentEmailPattern: null };
-    expect(
-      determineRole({ ...off, email: "tanaka@school.onmicrosoft.com" }),
-    ).toBe("student");
-    expect(
-      determineRole({
-        ...off,
-        email: "tanaka@school.onmicrosoft.com",
-        activeTeacherEmails: ["tanaka@school.onmicrosoft.com"],
-      }),
-    ).toBe("teacher");
   });
 });
 

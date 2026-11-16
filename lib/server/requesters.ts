@@ -18,25 +18,14 @@ const READ_LIMIT = 40;
 async function studentChecker(): Promise<(email: string) => boolean> {
   const db = getDb();
   const env = getEnv();
-  const [admins, teachers] = await Promise.all([
-    db.adminEmail.findMany({ select: { email: true } }),
-    env.STUDENT_EMAIL_PATTERN
-      ? Promise.resolve([])
-      : db.teacher.findMany({
-          where: { active: true, email: { not: null } },
-          select: { email: true },
-        }),
-  ]);
-  const adminEmails = admins.map((row) => row.email);
-  const teacherEmails = teachers.flatMap((row) =>
-    row.email ? [row.email] : [],
-  );
+  const adminEmails = (
+    await db.adminEmail.findMany({ select: { email: true } })
+  ).map((row) => row.email);
   return (email) =>
     determineRole({
       email,
       initialAdminEmail: env.INITIAL_ADMIN_EMAIL,
       adminEmails,
-      activeTeacherEmails: teacherEmails,
       studentEmailPattern: env.STUDENT_EMAIL_PATTERN,
     }) === "student";
 }

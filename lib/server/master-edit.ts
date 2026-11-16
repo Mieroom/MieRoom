@@ -268,10 +268,10 @@ const parseVersion = (value: unknown): Date | null => {
   return Number.isNaN(time) ? null : new Date(time);
 };
 
-/** Is the name or e-mail taken by another row (also an inactive one)? */
+/** Is the name taken by another row (also an inactive one)? */
 async function takenBy(
   kind: MasterKind,
-  value: { name?: string; displayName?: string; email?: string | null },
+  value: { name?: string; displayName?: string },
   selfId: string | null,
 ): Promise<FieldError[]> {
   const db = getDb();
@@ -309,21 +309,12 @@ async function takenBy(
       }
       break;
     case "teachers": {
-      const [byName, byEmail] = await Promise.all([
-        db.teacher.findFirst({
-          where: { displayName: value.displayName, ...other },
-          select: { id: true },
-        }),
-        value.email
-          ? db.teacher.findFirst({
-              where: { email: value.email, ...other },
-              select: { id: true },
-            })
-          : null,
-      ]);
+      const byName = await db.teacher.findFirst({
+        where: { displayName: value.displayName, ...other },
+        select: { id: true },
+      });
       if (byName)
         errors.push({ field: "displayName", message: MESSAGES.ME502 });
-      if (byEmail) errors.push({ field: "email", message: MESSAGES.ME507 });
       break;
     }
   }
@@ -355,7 +346,6 @@ export async function saveMaster(
   const value = parsed.value as Record<string, unknown> & {
     name?: string;
     displayName?: string;
-    email?: string | null;
   };
 
   const db = getDb();
@@ -455,10 +445,7 @@ async function create(kind: MasterKind, value: Record<string, unknown>) {
       return;
     case "teachers":
       await db.teacher.create({
-        data: {
-          displayName: String(value.displayName),
-          email: value.email as string | null,
-        },
+        data: { displayName: String(value.displayName) },
       });
   }
 }
@@ -558,7 +545,7 @@ async function update(
         count = (
           await tx.teacher.updateMany({
             where: guard,
-            data: { displayName: newName, email: value.email as string | null },
+            data: { displayName: newName },
           })
         ).count;
         if (count === 1 && oldName !== newName) {

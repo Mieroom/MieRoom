@@ -4,7 +4,7 @@
 //
 //   SEED_ALLOWED_EMAILS  who may sign in while APP_ENV=development (comma separated)
 //   SEED_ADMIN_EMAILS    who becomes 時間割管理者 (the first one is INITIAL_ADMIN_EMAIL anyway)
-//   SEED_TEACHER_EMAILS  who becomes 先生 (adds a teacher named after the part before "@")
+// 先生は、学生用の形 (STUDENT_EMAIL_PATTERN) に合わない学校アカウントが、自動でなる。登録は要らない。
 
 import { PrismaNeon } from "@prisma/adapter-neon";
 import { z } from "zod";
@@ -34,7 +34,6 @@ async function main() {
 
   const allowed = readList("SEED_ALLOWED_EMAILS");
   const admins = readList("SEED_ADMIN_EMAILS");
-  const teachers = readList("SEED_TEACHER_EMAILS");
 
   const db = new PrismaClient({
     adapter: new PrismaNeon({ connectionString }),
@@ -54,19 +53,8 @@ async function main() {
         create: { email: value },
       });
     }
-    for (const value of teachers) {
-      await db.teacher.upsert({
-        where: { email: value },
-        update: { active: true },
-        create: {
-          email: value,
-          displayName: value.split("@")[0],
-          active: true,
-        },
-      });
-    }
     console.log(
-      `Done: ${allowed.length} allowed, ${admins.length} admin, ${teachers.length} teacher e-mail(s).`,
+      `Done: ${allowed.length} allowed, ${admins.length} admin e-mail(s).`,
     );
   } finally {
     await db.$disconnect();

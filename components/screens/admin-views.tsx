@@ -86,7 +86,6 @@ export type MasterData =
       rows: {
         id: string;
         name: string;
-        email: string | null;
         tagId: string | null;
         active: boolean;
         version: string;
@@ -264,7 +263,6 @@ export function MastersView({
               <thead>
                 <tr>
                   <Th>時間割での表記</Th>
-                  <Th>メール</Th>
                   <Th>タグID</Th>
                   <Th>状態</Th>
                   <Th>操作</Th>
@@ -276,7 +274,6 @@ export function MastersView({
                     <Td>
                       <strong>{row.name}</strong>
                     </Td>
-                    <Td>{row.email ?? "—"}</Td>
                     <Td>{row.tagId ?? "—"}</Td>
                     <Td>
                       <ActiveBadge active={row.active} />
@@ -289,7 +286,6 @@ export function MastersView({
                             id: row.id,
                             version: row.version,
                             name: row.name,
-                            email: row.email,
                           }}
                           rooms={rooms}
                           defaultYear={defaultYear}

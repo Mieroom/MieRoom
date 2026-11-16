@@ -18,7 +18,6 @@ export type EditableRow = {
   homeRoomId?: string;
   startYear?: number;
   endYear?: number | null;
-  email?: string | null;
   building?: string | null;
   kind?: "HOMEROOM" | "FREE";
   note?: string | null;
@@ -434,13 +433,6 @@ function Fields({
             errors={errors}
             defaultValue={row?.name}
             help="20文字まで。「各担当」「外部講師」「、」は使えません"
-          />
-          <Text
-            name="email"
-            label="メール"
-            errors={errors}
-            defaultValue={row?.email}
-            help="先生としてログインするには必要です"
           />
         </>
       );

@@ -69,7 +69,7 @@ npm run docs:build -- --skip-tests      # 単体テストを走らせず、前�
 
 ## ログインの準備(開発用)
 
-1. Vercel の環境変数に、`.env.example` の値を入れる(Microsoft 関係、`BETTER_AUTH_SECRET`、`BETTER_AUTH_URL`、`ALLOWED_EMAIL_DOMAINS`、`APP_ENV=development` など)。接続文字列や秘密の値は、チャットに貼らず、直接入れる。
+1. Vercel の環境変数に、`.env.example` の値を入れる(Microsoft 関係、`BETTER_AUTH_SECRET`、`BETTER_AUTH_URL`、`ALLOWED_EMAIL_DOMAINS`、`STUDENT_EMAIL_PATTERN`(必須。例 `[0-9]{6}`)、`APP_ENV=development` など)。接続文字列や秘密の値は、チャットに貼らず、直接入れる。
 2. 表を作る(バック担当だけ): `.env.local` に `DATABASE_URL_UNPOOLED` を入れて `npm run db:push`。
 3. 許可リストを入れる: `.env.local` に `SEED_ALLOWED_EMAILS`(カンマ区切り)などを入れて `npm run db:seed`。メールは Git に入れない。
 4. 開発環境(`APP_ENV=development`)では、許可リストにある人と `INITIAL_ADMIN_EMAIL` だけがログインできる。

@@ -57,7 +57,6 @@ export async function loadMaster(
         select: {
           id: true,
           displayName: true,
-          email: true,
           tagId: true,
           active: true,
           updatedAt: true,
