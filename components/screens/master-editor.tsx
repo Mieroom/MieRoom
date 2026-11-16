@@ -146,11 +146,15 @@ function SubjectLinkFields({
   const allChosen =
     choices.classes.length > 0 && chosen.size === choices.classes.length;
   return (
-    <fieldset className="flex flex-col gap-3 rounded-lg border border-line p-3">
-      <legend className="px-1 text-xs font-semibold">
+    <div
+      role="group"
+      aria-label="一緒に紐づける"
+      className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 rounded-lg border border-line p-3"
+    >
+      <p className="text-xs font-semibold">
         一緒に紐づける
         <span className="ml-2 font-normal text-muted">任意</span>
-      </legend>
+      </p>
       {choices.classes.length === 0 ? (
         <p className="text-[11px] text-muted">
           今年度に存在する有効なクラスがありません。
@@ -177,7 +181,7 @@ function SubjectLinkFields({
               {allChosen ? "すべて外す" : "すべて選ぶ"}
             </Button>
           </div>
-          <div className="grid max-h-[50vh] grid-cols-1 gap-1.5 overflow-y-auto sm:grid-cols-2">
+          <div className="grid min-h-20 grid-cols-1 content-start gap-1.5 overflow-y-auto sm:grid-cols-2">
             {choices.classes.map((item) => (
               <label
                 key={item.id}
@@ -237,7 +241,7 @@ function SubjectLinkFields({
           {errors.links}
         </p>
       )}
-    </fieldset>
+    </div>
   );
 }
 
@@ -256,11 +260,15 @@ function ClassLinkFields({
   const allChosen =
     choices.subjects.length > 0 && chosen.size === choices.subjects.length;
   return (
-    <fieldset className="flex flex-col gap-3 rounded-lg border border-line p-3">
-      <legend className="px-1 text-xs font-semibold">
+    <div
+      role="group"
+      aria-label="一緒に紐づける"
+      className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 rounded-lg border border-line p-3"
+    >
+      <p className="text-xs font-semibold">
         一緒に紐づける
         <span className="ml-2 font-normal text-muted">任意</span>
-      </legend>
+      </p>
       {choices.subjects.length === 0 ? (
         <p className="text-[11px] text-muted">有効な教科がありません。</p>
       ) : (
@@ -285,13 +293,13 @@ function ClassLinkFields({
               {allChosen ? "すべて外す" : "すべて選ぶ"}
             </Button>
           </div>
-          <div className="flex max-h-[55vh] flex-col gap-1.5 overflow-y-auto">
+          <div className="flex min-h-20 flex-col gap-1.5 overflow-y-auto">
             {choices.subjects.map((item) => {
               const on = chosen.has(item.id);
               return (
                 <div
                   key={item.id}
-                  className="flex flex-col gap-2 rounded-md border border-line px-2.5 py-1.5"
+                  className="flex shrink-0 flex-col gap-2 rounded-md border border-line px-2.5 py-1.5"
                 >
                   <label className="flex cursor-pointer items-center gap-2 text-sm font-normal">
                     <input
@@ -350,7 +358,7 @@ function ClassLinkFields({
           {errors.links}
         </p>
       )}
-    </fieldset>
+    </div>
   );
 }
 
@@ -375,45 +383,47 @@ function Fields({
     case "classes":
       return (
         <>
-          <Text
-            name="name"
-            label="クラス名"
-            required
-            errors={errors}
-            defaultValue={row?.name}
-          />
-          <Field label="ホームルーム教室" required error={errors.homeRoomId}>
-            <select
-              name="homeRoomId"
-              defaultValue={row?.homeRoomId ?? ""}
-              className={fieldClass}
-            >
-              <option value="" disabled>
-                選んでください
-              </option>
-              {rooms.map((room) => (
-                <option key={room.id} value={room.id}>
-                  {room.name}
+          <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+            <Text
+              name="name"
+              label="クラス名"
+              required
+              errors={errors}
+              defaultValue={row?.name}
+            />
+            <Field label="ホームルーム教室" required error={errors.homeRoomId}>
+              <select
+                name="homeRoomId"
+                defaultValue={row?.homeRoomId ?? ""}
+                className={fieldClass}
+              >
+                <option value="" disabled>
+                  選んでください
                 </option>
-              ))}
-            </select>
-          </Field>
-          <Text
-            name="startYear"
-            label="開始年度"
-            required
-            inputMode="numeric"
-            errors={errors}
-            defaultValue={row?.startYear ?? defaultYear}
-          />
-          <Text
-            name="endYear"
-            label="終了年度"
-            inputMode="numeric"
-            errors={errors}
-            defaultValue={row?.endYear}
-            help="空欄 = 続く"
-          />
+                {rooms.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {room.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Text
+              name="startYear"
+              label="開始年度"
+              required
+              inputMode="numeric"
+              errors={errors}
+              defaultValue={row?.startYear ?? defaultYear}
+            />
+            <Text
+              name="endYear"
+              label="終了年度"
+              inputMode="numeric"
+              errors={errors}
+              defaultValue={row?.endYear}
+              help="空欄 = 続く"
+            />
+          </div>
           {row === null && classLinkChoices && (
             <ClassLinkFields
               choices={classLinkChoices}
@@ -542,11 +552,11 @@ export function MasterEditButton({
       <dialog
         ref={dialog}
         aria-label={row ? "編集" : "追加"}
-        className={`m-auto max-h-[92vh] ${wide ? "w-[min(96vw,760px)]" : "w-[min(94vw,520px)]"} overflow-y-auto rounded-xl border border-line bg-white p-5 text-xs text-ink shadow-xl backdrop:bg-black/40`}
+        className={`m-auto max-h-[92vh] ${wide ? "w-[min(96vw,760px)] overflow-hidden" : "w-[min(94vw,520px)] overflow-y-auto"} rounded-xl border border-line bg-white p-5 text-xs text-ink shadow-xl backdrop:bg-black/40`}
       >
         <form
           key={opened}
-          className="flex flex-col gap-4"
+          className={`flex flex-col gap-4 ${wide ? "max-h-[calc(92vh-2.5rem)]" : ""}`}
           onSubmit={async (event) => {
             event.preventDefault();
             if (busy) return;
