@@ -39,6 +39,7 @@ export function ReservationFormView({
   check,
   basePath,
   homeroomNotes,
+  applicantName,
 }: {
   mode: "apply" | "proxy";
   rooms: RoomRow[];
@@ -50,6 +51,8 @@ export function ReservationFormView({
   basePath: string;
   /** S12 only: for each slot, the classes behind MW203 */
   homeroomNotes?: Record<number, string[]>;
+  /** S06: the signed-in person's name, shown in the read-only 申請者 box */
+  applicantName?: string;
 }) {
   const room = rooms.find((item) => item.id === roomId) ?? null;
   const error = checkMessage(check, date, today);
@@ -115,9 +118,7 @@ export function ReservationFormView({
         periodNo={periodNo}
         statuses={room?.slots ?? null}
         submitLabel={mode === "apply" ? "申請する" : "保存する"}
-        applicantLabel={
-          mode === "apply" ? "ログイン中の人" : "ログイン中の先生"
-        }
+        applicantLabel={applicantName ?? "ログイン中の人"}
         mode={mode}
         homeroomNotes={homeroomNotes}
       />

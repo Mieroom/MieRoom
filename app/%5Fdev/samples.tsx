@@ -576,6 +576,7 @@ export function sampleFor(
             periodNo={parsePeriodNo(one(params.period)) ?? 2}
             check={checkApplicationDate(date, now, [])}
             basePath={base}
+            applicantName="山田 太郎"
           />
         ),
       };

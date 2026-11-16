@@ -12,6 +12,7 @@ import { loadRoomRows } from "@/lib/server/queries/lessons";
 import { loadApprovalFacts } from "@/lib/server/queries/review";
 import { SLOTS } from "@/lib/domain/periods";
 import { one } from "@/lib/url";
+import { getCurrentUser } from "@/lib/server/session";
 import { ReservationFormView } from "./reservation-form-view";
 
 // Data for S06 and S12, which share their items and rules (R4-9).
@@ -30,9 +31,10 @@ export async function ReservationFormPage({
   const requestedDate = one(params.date);
   const date = isSchoolDate(requestedDate) ? requestedDate : addDays(today, 1);
   // The rooms with the state of every slot of the day: 授業, 使用止め, 予約 (R4-1).
-  const [{ rooms }, closures] = await Promise.all([
+  const [{ rooms }, closures, user] = await Promise.all([
     loadRoomRows(date, fiscalYearOfDate(date), now),
     listSchoolClosures(addDays(date, -60), date),
+    getCurrentUser(),
   ]);
   const requestedRoom = one(params.room);
   const roomId = rooms.find((room) => room.id === requestedRoom)?.id ?? null;
@@ -66,6 +68,7 @@ export async function ReservationFormPage({
       check={checkApplicationDate(date, now, closures)}
       basePath={basePath}
       homeroomNotes={homeroomNotes}
+      applicantName={user?.name}
     />
   );
 }
