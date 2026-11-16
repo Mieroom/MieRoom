@@ -32,6 +32,12 @@ export type SubjectLinkChoices = {
   teachers: { id: string; name: string }[];
 };
 
+/** クラスの追加と一緒に紐づけるときの、選べるもの (有効な教科、有効な講師)。 */
+export type ClassLinkChoices = {
+  subjects: { id: string; name: string }[];
+  teachers: { id: string; name: string }[];
+};
+
 async function send(
   endpoint: string,
   body: unknown,
@@ -241,6 +247,124 @@ function SubjectLinkFields({
   );
 }
 
+// クラスの追加 (S21): そのクラスが取る教科を選び、教科ごとに講師と教室を入れる。講師は既定が「各担当」、
+// 教室は既定が「ー(教室未定)」。選んだ教科の行だけに、講師と教室の選び欄が出る。
+function ClassLinkFields({
+  choices,
+  rooms,
+  errors,
+}: {
+  choices: ClassLinkChoices;
+  rooms: { id: string; name: string }[];
+  errors: FieldErrors;
+}) {
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const allChosen =
+    choices.subjects.length > 0 && chosen.size === choices.subjects.length;
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-lg border border-line p-3">
+      <legend className="px-1 text-xs font-semibold">
+        一緒に紐づける
+        <span className="ml-2 font-normal text-muted">任意</span>
+      </legend>
+      <p className="text-[11px] text-muted">
+        このクラスが取る教科を選ぶと、教科ごとの講師・教室を、まとめて入れます。
+        選ばなければ、クラスだけを追加します(紐づけは、あとから S22
+        でも入れられます)。
+      </p>
+      {choices.subjects.length === 0 ? (
+        <p className="text-[11px] text-muted">有効な教科がありません。</p>
+      ) : (
+        <>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold">
+              教科
+              <span className="ml-1.5 font-normal text-muted">
+                {chosen.size}/{choices.subjects.length}
+              </span>
+            </span>
+            <Button
+              size="sm"
+              onClick={() =>
+                setChosen(
+                  allChosen
+                    ? new Set()
+                    : new Set(choices.subjects.map((item) => item.id)),
+                )
+              }
+            >
+              {allChosen ? "すべて外す" : "すべて選ぶ"}
+            </Button>
+          </div>
+          <div className="flex max-h-56 flex-col gap-1.5 overflow-y-auto">
+            {choices.subjects.map((item) => {
+              const on = chosen.has(item.id);
+              return (
+                <div
+                  key={item.id}
+                  className="flex flex-col gap-2 rounded-md border border-line px-2.5 py-1.5"
+                >
+                  <label className="flex cursor-pointer items-center gap-2 text-xs font-normal">
+                    <input
+                      type="checkbox"
+                      name="clsSubject"
+                      value={item.id}
+                      className="size-4 shrink-0 accent-brand"
+                      checked={on}
+                      onChange={(event) => {
+                        const next = new Set(chosen);
+                        if (event.target.checked) next.add(item.id);
+                        else next.delete(item.id);
+                        setChosen(next);
+                      }}
+                    />
+                    <span className="min-w-0 truncate">{item.name}</span>
+                  </label>
+                  {on && (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <select
+                        name={`clsTeacher_${item.id}`}
+                        aria-label={`${item.name}の講師`}
+                        defaultValue="each"
+                        className={fieldClass}
+                      >
+                        <option value="each">講師: 各担当</option>
+                        {choices.teachers.map((teacher) => (
+                          <option key={teacher.id} value={teacher.id}>
+                            {teacher.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        name={`clsRoom_${item.id}`}
+                        aria-label={`${item.name}の教室`}
+                        defaultValue="none"
+                        className={fieldClass}
+                      >
+                        <option value="none">教室: ー(教室未定)</option>
+                        {rooms.map((room) => (
+                          <option key={room.id} value={room.id}>
+                            {room.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+      {errors.links && (
+        <p role="alert" className="text-[11px] text-red-ink">
+          {errors.links}
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
 function Fields({
   tab,
   row,
@@ -248,6 +372,7 @@ function Fields({
   errors,
   defaultYear,
   linkChoices,
+  classLinkChoices,
 }: {
   tab: Tab;
   row: EditableRow | null;
@@ -255,6 +380,7 @@ function Fields({
   errors: FieldErrors;
   defaultYear: number;
   linkChoices?: SubjectLinkChoices;
+  classLinkChoices?: ClassLinkChoices;
 }) {
   switch (tab) {
     case "classes":
@@ -299,6 +425,13 @@ function Fields({
             defaultValue={row?.endYear}
             help="空欄 = 続く"
           />
+          {row === null && classLinkChoices && (
+            <ClassLinkFields
+              choices={classLinkChoices}
+              rooms={rooms}
+              errors={errors}
+            />
+          )}
         </>
       );
     case "teachers":
@@ -386,6 +519,7 @@ export function MasterEditButton({
   rooms,
   defaultYear,
   linkChoices,
+  classLinkChoices,
   variant = "default",
   children,
 }: {
@@ -395,6 +529,8 @@ export function MasterEditButton({
   defaultYear: number;
   /** 教科の追加のとき: 一緒に紐づける、クラスと講師の候補 */
   linkChoices?: SubjectLinkChoices;
+  /** クラスの追加のとき: 一緒に紐づける、教科と講師の候補 */
+  classLinkChoices?: ClassLinkChoices;
   variant?: "default" | "primary";
   children: ReactNode;
 }) {
@@ -435,15 +571,30 @@ export function MasterEditButton({
               linkClass: _classes,
               linkTeacher,
               linkRoom,
-              ...form
+              ...rest
             } = Object.fromEntries(data);
             void _classes;
+            // クラスの追加の欄 (clsSubject / clsTeacher_* / clsRoom_*) は、本体から外す
+            const form = Object.fromEntries(
+              Object.entries(rest).filter(([key]) => !key.startsWith("cls")),
+            );
+            // クラスの追加: 選んだ教科ごとの講師・教室
+            const subjectLinks =
+              tab === "classes" && !row
+                ? data.getAll("clsSubject").map((subjectId) => ({
+                    subjectId,
+                    teacherId: data.get(`clsTeacher_${String(subjectId)}`),
+                    roomId: data.get(`clsRoom_${String(subjectId)}`),
+                  }))
+                : [];
             // 教科の追加: 選んだクラスがあれば、紐づけも一緒に送る
             const classIds = data.getAll("linkClass");
             const links =
               tab === "subjects" && !row && classIds.length > 0
                 ? { classIds, teacherId: linkTeacher, roomId: linkRoom }
-                : {};
+                : subjectLinks.length > 0
+                  ? { subjectLinks }
+                  : {};
             setBusy(true);
             setErrors({});
             setMessage(null);
@@ -471,6 +622,7 @@ export function MasterEditButton({
             errors={errors}
             defaultYear={defaultYear}
             linkChoices={linkChoices}
+            classLinkChoices={classLinkChoices}
           />
           {message && (
             <p role="alert" className="text-[11px] text-red-ink">

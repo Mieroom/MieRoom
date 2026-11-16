@@ -182,3 +182,70 @@ describe("教科の追加 + 紐づけ", () => {
     expect(await db.classSubject.count()).toBe(0);
   });
 });
+
+describe("クラスの追加 + 紐づけ", () => {
+  const addClass = {
+    name: "新クラス",
+    homeRoomId: ID.roomHome,
+    startYear: "2026",
+    endYear: "",
+  };
+
+  it("T-SUB-007 選んだ教科ごとの講師・教室で、クラスと 3 つの紐づけが、1 回で入る", async () => {
+    const db = testDb();
+    const math = await db.subject.create({ data: { name: "数学" } });
+    const english = await db.subject.create({ data: { name: "英語A" } });
+    const result = await saveMaster(
+      "classes",
+      {
+        ...addClass,
+        subjectLinks: [
+          { subjectId: math.id, teacherId: ID.teacher, roomId: ID.roomHome },
+          { subjectId: english.id, teacherId: "each", roomId: "none" },
+        ],
+      },
+      NOW,
+    );
+    expect(result).toMatchObject({ kind: "saved" });
+    const created = await db.schoolClass.findFirstOrThrow({
+      where: { name: "新クラス" },
+    });
+    expect(
+      (await db.classSubject.findMany({ where: { classId: created.id } }))
+        .map((row) => row.subjectId)
+        .sort(),
+    ).toEqual([math.id, english.id].sort());
+    expect(
+      await db.subjectTeacher.findFirstOrThrow({
+        where: { classId: created.id, subjectId: math.id },
+      }),
+    ).toMatchObject({ teacherId: ID.teacher, teacherKey: ID.teacher });
+    expect(
+      await db.subjectTeacher.findFirstOrThrow({
+        where: { classId: created.id, subjectId: english.id },
+      }),
+    ).toMatchObject({ teacherId: null, teacherKey: "each" });
+    expect(
+      await db.subjectRoom.findFirstOrThrow({
+        where: { classId: created.id, subjectId: english.id },
+      }),
+    ).toMatchObject({ roomId: null, roomKey: "none" });
+  });
+
+  it("T-SUB-008 無効な教科を混ぜると、クラスも紐づけも入らない", async () => {
+    const db = testDb();
+    const off = await db.subject.create({
+      data: { name: "旧教科", active: false },
+    });
+    const before = await db.schoolClass.count();
+    expect(
+      await saveMaster(
+        "classes",
+        { ...addClass, subjectLinks: [{ subjectId: off.id }] },
+        NOW,
+      ),
+    ).toMatchObject({ kind: "invalid", errors: [{ field: "links" }] });
+    expect(await db.schoolClass.count()).toBe(before);
+    expect(await db.classSubject.count()).toBe(0);
+  });
+});

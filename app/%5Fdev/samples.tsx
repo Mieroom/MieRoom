@@ -760,6 +760,19 @@ export function sampleFor(
                   }
                 : undefined
             }
+            classLinkChoices={
+              tab === "classes"
+                ? {
+                    subjects: ["英語A", "数学", "情報処理", "ビジネス実務"].map(
+                      (name, index) => ({ id: `sub-${index}`, name }),
+                    ),
+                    teachers: TEACHERS.map((item) => ({
+                      id: item.id,
+                      name: item.name,
+                    })),
+                  }
+                : undefined
+            }
           />
         ),
       };

@@ -26,6 +26,14 @@ export function listClassesForYear(year: number) {
   });
 }
 
+export async function listActiveSubjects() {
+  return getDb().subject.findMany({
+    where: { active: true },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+}
+
 export async function listActiveTeachers() {
   const rows = await getDb().teacher.findMany({
     where: { active: true },

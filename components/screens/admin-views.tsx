@@ -28,6 +28,7 @@ import { DeleteButton } from "./delete-button";
 import {
   MasterActiveButton,
   MasterEditButton,
+  type ClassLinkChoices,
   type SubjectLinkChoices,
 } from "./master-editor";
 import {
@@ -116,6 +117,7 @@ export function MastersView({
   basePath = "/admin/masters",
   rooms = [],
   linkChoices,
+  classLinkChoices,
   defaultYear,
   notice,
   renamed = false,
@@ -129,6 +131,8 @@ export function MastersView({
   rooms?: { id: string; name: string }[];
   /** 教科の追加で、一緒に紐づけるクラスと講師の候補 (教科のタブだけ) */
   linkChoices?: SubjectLinkChoices;
+  /** クラスの追加で、一緒に紐づける教科と講師の候補 (クラスのタブだけ) */
+  classLinkChoices?: ClassLinkChoices;
   /** 開始年度の初期値: this school year */
   defaultYear: number;
   /** MI501 / MI502: what was just done */
@@ -150,6 +154,7 @@ export function MastersView({
             rooms={rooms}
             defaultYear={defaultYear}
             linkChoices={linkChoices}
+            classLinkChoices={classLinkChoices}
             variant="primary"
           >
             <Icon name="plus" size={16} />

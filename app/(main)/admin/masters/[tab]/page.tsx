@@ -5,6 +5,7 @@ import { fiscalYearOfDate, schoolToday } from "@/lib/domain/school-date";
 import { noticeText } from "@/lib/notice";
 import { loadMaster } from "@/lib/server/queries/admin";
 import {
+  listActiveSubjects,
   listActiveTeachers,
   listClassesForYear,
   loadRoomList,
@@ -52,12 +53,21 @@ export default async function MastersPage({
           teachers: await listActiveTeachers(),
         }
       : undefined;
+  // クラスの追加も、教科を選び、教科ごとに講師・教室を入れられる。
+  const classLinkChoices =
+    tab === "classes"
+      ? {
+          subjects: await listActiveSubjects(),
+          teachers: await listActiveTeachers(),
+        }
+      : undefined;
   return (
     <MastersView
       data={await loadMaster(tab, showInactive)}
       showInactive={showInactive}
       rooms={rooms.map((room) => ({ id: room.id, name: room.name }))}
       linkChoices={linkChoices}
+      classLinkChoices={classLinkChoices}
       defaultYear={year}
       notice={noticeText(one(query.notice))}
       renamed={one(query.renamed) === "1"}

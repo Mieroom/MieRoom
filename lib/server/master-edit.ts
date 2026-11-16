@@ -147,6 +147,121 @@ async function createSubjectWithLinks(name: string, links: SubjectLinks) {
   });
 }
 
+/** クラスを追加するとき、一緒に紐づける教科の数の上限 (教科マスタの上限と同じ)。 */
+const MAX_LINK_SUBJECTS = 100;
+
+type ClassLink = { subjectId: string; teacherKey: string; roomKey: string };
+
+/**
+ * クラスの追加と一緒に入れる紐づけ (S21): そのクラスが取る教科と、教科ごとの講師・教室。講師は
+ * 「各担当」、教室は「教室未定」を選べる。教科を選ばなければ、紐づけは作らない (null)。
+ * 選べるのは、有効な教科・講師・教室だけ (S22 と同じ)。同じ教科を 2 つ入れることはできない。
+ */
+async function parseClassLinks(
+  body: Record<string, unknown>,
+): Promise<
+  { ok: true; links: ClassLink[] | null } | { ok: false; errors: FieldError[] }
+> {
+  const raw = body.subjectLinks;
+  if (raw === undefined || raw === null) return { ok: true, links: null };
+  const invalid: { ok: false; errors: FieldError[] } = {
+    ok: false,
+    errors: [{ field: "links", message: MESSAGES.ME706 }],
+  };
+  if (!Array.isArray(raw) || raw.length > MAX_LINK_SUBJECTS) return invalid;
+  if (raw.length === 0) return { ok: true, links: null };
+
+  const links: ClassLink[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) return invalid;
+    const { subjectId, teacherId, roomId } = item as Record<string, unknown>;
+    const teacherKey = teacherId === undefined ? EACH_TEACHER : teacherId;
+    const roomKey = roomId === undefined ? NO_ROOM : roomId;
+    if (
+      typeof subjectId !== "string" ||
+      !UUID.test(subjectId) ||
+      typeof teacherKey !== "string" ||
+      typeof roomKey !== "string" ||
+      (teacherKey !== EACH_TEACHER && !UUID.test(teacherKey)) ||
+      (roomKey !== NO_ROOM && !UUID.test(roomKey))
+    ) {
+      return invalid;
+    }
+    links.push({ subjectId, teacherKey, roomKey });
+  }
+  const subjectIds = links.map((link) => link.subjectId);
+  if (new Set(subjectIds).size !== subjectIds.length) return invalid;
+  const teacherIds = [
+    ...new Set(
+      links
+        .map((link) => link.teacherKey)
+        .filter((key) => key !== EACH_TEACHER),
+    ),
+  ];
+  const roomIds = [
+    ...new Set(
+      links.map((link) => link.roomKey).filter((key) => key !== NO_ROOM),
+    ),
+  ];
+
+  const db = getDb();
+  const [subjects, teachers, rooms] = await Promise.all([
+    db.subject.count({ where: { id: { in: subjectIds }, active: true } }),
+    teacherIds.length === 0
+      ? Promise.resolve(0)
+      : db.teacher.count({ where: { id: { in: teacherIds }, active: true } }),
+    roomIds.length === 0
+      ? Promise.resolve(0)
+      : db.room.count({ where: { id: { in: roomIds }, active: true } }),
+  ]);
+  if (
+    subjects !== subjectIds.length ||
+    teachers !== teacherIds.length ||
+    rooms !== roomIds.length
+  ) {
+    return invalid;
+  }
+  return { ok: true, links };
+}
+
+/** クラスを作り、選んだ教科の紐づけ (クラスの教科、教科の講師、教科の教室) を、1 回で書く。 */
+async function createClassWithLinks(
+  value: Record<string, unknown>,
+  links: ClassLink[],
+) {
+  await getDb().$transaction(async (tx) => {
+    const created = await tx.schoolClass.create({
+      data: {
+        name: String(value.name),
+        homeRoomId: String(value.homeRoomId),
+        startYear: Number(value.startYear),
+        endYear: value.endYear === null ? null : Number(value.endYear),
+      },
+      select: { id: true },
+    });
+    const classId = created.id;
+    await tx.classSubject.createMany({
+      data: links.map((link) => ({ classId, subjectId: link.subjectId })),
+    });
+    await tx.subjectTeacher.createMany({
+      data: links.map((link) => ({
+        classId,
+        subjectId: link.subjectId,
+        teacherId: link.teacherKey === EACH_TEACHER ? null : link.teacherKey,
+        teacherKey: link.teacherKey,
+      })),
+    });
+    await tx.subjectRoom.createMany({
+      data: links.map((link) => ({
+        classId,
+        subjectId: link.subjectId,
+        roomId: link.roomKey === NO_ROOM ? null : link.roomKey,
+        roomKey: link.roomKey,
+      })),
+    });
+  });
+}
+
 const parseVersion = (value: unknown): Date | null => {
   if (typeof value !== "string") return null;
   const time = Date.parse(value);
@@ -261,6 +376,13 @@ export async function saveMaster(
     if (!links.ok) errors.push(...links.errors);
     else subjectLinks = links.links;
   }
+  // クラスの追加だけ、紐づけも一緒に入れられる (S21)。編集では使わない。
+  let classLinks: ClassLink[] | null = null;
+  if (kind === "classes" && id === null) {
+    const links = await parseClassLinks(body);
+    if (!links.ok) errors.push(...links.errors);
+    else classLinks = links.links;
+  }
   if (errors.length > 0) return { kind: "invalid", errors };
 
   const today = textToDateColumn(schoolToday(now));
@@ -269,6 +391,8 @@ export async function saveMaster(
     if (id === null) {
       if (subjectLinks) {
         await createSubjectWithLinks(String(value.name), subjectLinks);
+      } else if (classLinks) {
+        await createClassWithLinks(value, classLinks);
       } else {
         await create(kind, value);
       }
