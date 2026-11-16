@@ -10,8 +10,6 @@ import {
   parseWeekStart,
   schoolMinutes,
   schoolToday,
-  weekDates,
-  weekdayOf,
   type WeekStart,
 } from "@/lib/domain/school-date";
 import {
@@ -28,9 +26,8 @@ function datesOf(
   start: WeekStart,
 ): string[] {
   if (mode === "day") return [date];
-  // 月〜土 (月曜始まり) または 日〜土 (日曜始まり)。土日は、授業があるときだけ出す
-  // (下で、授業のない土日を外す。14-1 #19)。
-  if (mode === "week") return weekDates(date, start);
+  // The weeks that hold the month: the calendar below xl also draws the days of the
+  // previous and next months in its first and last rows.
   return monthWeeks(monthOf(date), start).flat();
 }
 
@@ -44,9 +41,9 @@ export default async function TimetablePage({
   const today = schoolToday(now);
   const requestedDate = one(params.date);
   const date = isSchoolDate(requestedDate) ? requestedDate : today;
-  const view = one(params.view);
-  const mode: TimetableMode =
-    view === "week" || view === "month" ? view : "day";
+  // The month opens by default. view=day is one day in detail (a date of the month,
+  // or ホームの「今日の時間割を見る」). An old view=week link shows the month.
+  const mode: TimetableMode = one(params.view) === "day" ? "day" : "month";
   // 週の始まり。選んだ方はブラウザが覚えて、URL で送ってくる (week-start-memory.tsx)。
   const weekStart = parseWeekStart(one(params.start));
 
@@ -61,16 +58,10 @@ export default async function TimetablePage({
     : (classes.find((item) => item.id === one(params.class)) ??
       classes[0] ??
       null);
-  const loaded = await loadTimetableDays(datesOf(mode, date, weekStart), {
+  const days = await loadTimetableDays(datesOf(mode, date, weekStart), {
     classId: selectedClass?.id ?? null,
     teacherId: selectedTeacher?.id ?? null,
   });
-  const days =
-    mode === "week"
-      ? loaded.filter(
-          (day) => weekdayOf(day.date) % 6 !== 0 || day.lessons.length > 0,
-        )
-      : loaded;
 
   return (
     <TimetableView

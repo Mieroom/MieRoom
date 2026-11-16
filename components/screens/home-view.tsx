@@ -265,6 +265,7 @@ export function HomeView({
           lessons={lessons}
           timetableHref={withQuery("/timetable", {
             class: selectedClassId,
+            view: "day",
             date: today,
           })}
         />
