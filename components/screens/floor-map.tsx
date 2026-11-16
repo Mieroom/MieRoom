@@ -80,50 +80,40 @@ const pointsText = (points: readonly Pt[]) =>
 const LINE = 2;
 
 /**
- * 塗りと枠線。枠線は、部屋の内側に引く (部屋の形で切り取る)。隣り合う部屋の線が、境目で
- * 重ならず、同じ太さで、並んで見える。openTop: 上の辺の線を引かない (上の部屋につながる)。
+ * 塗りと枠線。枠線の太さは、どの部屋も同じ (LINE)。線は辺の真ん中に引くので、隣り合う部屋の
+ * 辺が同じ位置なら、線は 1 本に重なる。openTop: 上の辺の線を引かない (上の部屋につながる)。
  */
 function Outlined({
-  uid,
   points,
   fill,
   stroke,
   dash,
   openTop,
 }: {
-  uid: string;
   points: readonly Pt[];
   fill: string;
   stroke: string;
   dash?: string;
   openTop?: boolean;
 }) {
-  const clip = `monitor-room-${uid}`;
-  return (
+  return openTop ? (
     <>
-      <clipPath id={clip}>
-        <polygon points={pointsText(points)} />
-      </clipPath>
       <polygon points={pointsText(points)} fill={fill} />
-      {openTop ? (
-        <polyline
-          points={pointsText([points[1], points[2], points[3], points[0]])}
-          fill="none"
-          stroke={stroke}
-          strokeWidth={LINE * 2}
-          clipPath={`url(#${clip})`}
-        />
-      ) : (
-        <polygon
-          points={pointsText(points)}
-          fill="none"
-          stroke={stroke}
-          strokeWidth={LINE * 2}
-          strokeDasharray={dash}
-          clipPath={`url(#${clip})`}
-        />
-      )}
+      <polyline
+        points={pointsText([points[1], points[2], points[3], points[0]])}
+        fill="none"
+        stroke={stroke}
+        strokeWidth={LINE}
+      />
     </>
+  ) : (
+    <polygon
+      points={pointsText(points)}
+      fill={fill}
+      stroke={stroke}
+      strokeWidth={LINE}
+      strokeDasharray={dash}
+    />
   );
 }
 
@@ -157,7 +147,7 @@ function Text({
   );
 }
 
-function Toilet({ room, uid }: { room: PlanRoom; uid: string }) {
+function Toilet({ room }: { room: PlanRoom }) {
   const style = TOILET[room.gender ?? "m"];
   const points = scaled(room.points);
   const [cx, cy] = centroid(points);
@@ -168,12 +158,7 @@ function Toilet({ room, uid }: { room: PlanRoom; uid: string }) {
     `${(x + dx * k).toFixed(1)},${(y + dy * k).toFixed(1)}`;
   return (
     <>
-      <Outlined
-        uid={uid}
-        points={points}
-        fill={style.fill}
-        stroke={style.stroke}
-      />
+      <Outlined points={points} fill={style.fill} stroke={style.stroke} />
       <circle cx={x} cy={y - 14 * k} r={6.5 * k} fill={style.ink} />
       {room.gender === "m" && (
         <rect
@@ -218,11 +203,9 @@ function Toilet({ room, uid }: { room: PlanRoom; uid: string }) {
 function StatusRoom({
   room,
   state,
-  uid,
 }: {
   room: PlanRoom;
   state: RoomState | undefined;
-  uid: string;
 }) {
   const points = scaled(room.points);
   const [cx, cy] = centroid(points);
@@ -241,7 +224,6 @@ function StatusRoom({
     return (
       <>
         <Outlined
-          uid={uid}
           points={points}
           fill={style.fill}
           stroke={style.stroke}
@@ -294,12 +276,7 @@ function StatusRoom({
           : "使用止め";
   return (
     <>
-      <Outlined
-        uid={uid}
-        points={points}
-        fill={style.fill}
-        stroke={style.stroke}
-      />
+      <Outlined points={points} fill={style.fill} stroke={style.stroke} />
       <Text
         x={cx}
         y={cy - (label ? 14 : 0)}
@@ -318,7 +295,7 @@ function StatusRoom({
   );
 }
 
-function PlainRoom({ room, uid }: { room: PlanRoom; uid: string }) {
+function PlainRoom({ room }: { room: PlanRoom }) {
   const style =
     room.kind === "office"
       ? OFFICE
@@ -339,7 +316,6 @@ function PlainRoom({ room, uid }: { room: PlanRoom; uid: string }) {
     <>
       {/* attachTop: 上の辺は、上の部屋との境目なので、線を引かない (右・下・左だけ) */}
       <Outlined
-        uid={uid}
         points={points}
         fill={style.fill}
         stroke={style.stroke}
@@ -426,18 +402,13 @@ function FloorPanel({
           {floor.rooms.map((room, i) => {
             if (room.kind === "room") {
               return (
-                <StatusRoom
-                  key={i}
-                  uid={`${floor.id}-${i}`}
-                  room={room}
-                  state={states[room.name]}
-                />
+                <StatusRoom key={i} room={room} state={states[room.name]} />
               );
             }
             if (room.kind === "wc") {
-              return <Toilet key={i} uid={`${floor.id}-${i}`} room={room} />;
+              return <Toilet key={i} room={room} />;
             }
-            return <PlainRoom key={i} uid={`${floor.id}-${i}`} room={room} />;
+            return <PlainRoom key={i} room={room} />;
           })}
         </g>
         <polygon
