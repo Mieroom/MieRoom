@@ -412,6 +412,12 @@ export function sampleFor(
                   }
             }
             closures={["防災訓練"]}
+            minutes={minutes}
+            todayTimetable={
+              one(params.undecided) === "1"
+                ? { date: today, entered: false, closures: [], lessons: [] }
+                : dayOf(today, today)
+            }
           />
         ),
       };

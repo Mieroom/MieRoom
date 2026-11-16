@@ -7,16 +7,19 @@ import { LinkButton } from "@/components/ui/button";
 import { SearchField } from "@/components/ui/form";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { Badge, Callout, Card } from "@/components/ui/parts";
-import { formatDate } from "@/lib/domain/school-date";
+import { PERIODS } from "@/lib/domain/periods";
+import { formatDate, formatLongDate } from "@/lib/domain/school-date";
 import { MESSAGES } from "@/lib/messages";
 import { withQuery } from "@/lib/url";
 import {
+  isRunning,
   LessonBadges,
   periodLabel,
   periodTime,
   roomText,
   teacherText,
   type LessonView,
+  type TimetableDay,
 } from "./lesson-parts";
 
 /** undecided: 未定 (R3-7, R6-4). ready: found in what has been entered. */
@@ -88,6 +91,108 @@ function CurrentLessonCard({
   );
 }
 
+/**
+ * 今日の時間割 of the chosen class, under the four cards. Below lg the periods are rows;
+ * from lg they sit side by side in one band, 1限 to 4限.
+ */
+function TodayTimetableCard({
+  className = "",
+  today,
+  minutes,
+  day,
+}: {
+  /** Grid placement only. */
+  className?: string;
+  today: string;
+  minutes: number;
+  /** Today for the chosen class. null: no class chosen. */
+  day: TimetableDay | null;
+}) {
+  return (
+    <Card className={`p-6 ${className}`}>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 className="text-[17px] font-bold">今日の時間割</h2>
+        <span className="text-xs text-muted">{formatLongDate(today)}</span>
+      </div>
+      {day === null ? (
+        <p className="mt-2 text-xs text-muted">{MESSAGES.MI001}</p>
+      ) : !day.entered ? (
+        <p className="mt-2 text-xs text-muted">未定</p>
+      ) : day.lessons.length === 0 ? (
+        <p className="mt-2 text-xs text-muted">今日は授業がありません。</p>
+      ) : (
+        <ol className="mt-4 divide-y divide-line overflow-hidden rounded-[11px] border border-line lg:grid lg:grid-cols-4 lg:divide-x lg:divide-y-0">
+          {PERIODS.map((period) => {
+            const lessons = day.lessons.filter(
+              (lesson) => lesson.periodNo === period.no,
+            );
+            const running = isRunning(period.no, day.date, today, minutes);
+            return (
+              <li
+                key={period.no}
+                className={`grid grid-cols-[60px_minmax(0,1fr)] gap-3 px-4 py-3 lg:flex lg:flex-col lg:gap-2.5 lg:p-4 ${
+                  running ? "bg-[#f2f5ff]" : ""
+                }`}
+              >
+                <div className="text-xs font-bold text-[#4a576c]">
+                  <span className="inline-flex flex-wrap items-center gap-1.5">
+                    {period.label}
+                    {running && <Badge kind="busy">いま</Badge>}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] font-normal text-muted">
+                    {period.start}-{period.end}
+                  </span>
+                </div>
+                <div className="flex min-w-0 flex-col gap-2.5">
+                  {lessons.length === 0 ? (
+                    <span className="text-xs text-muted">授業なし</span>
+                  ) : (
+                    lessons.map((lesson) => (
+                      <TodayLesson key={lesson.id} lesson={lesson} />
+                    ))
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </Card>
+  );
+}
+
+/** One lesson in 今日の時間割: subject and teacher on the left, the room on the right. */
+function TodayLesson({ lesson }: { lesson: LessonView }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* anywhere: a subject that auto-phrase keeps as one phrase (プログラミング基礎)
+              still wraps in the narrow 1024px columns instead of running into the room. */}
+          <span
+            className={`min-w-0 text-[13px] font-bold [overflow-wrap:anywhere] ${
+              lesson.cancelled ? "text-muted line-through" : ""
+            }`}
+          >
+            {lesson.subject}
+          </span>
+          <LessonBadges lesson={lesson} wrap />
+        </div>
+        <div className="mt-0.5 text-[11px] text-muted">
+          {teacherText(lesson.teachers)}
+        </div>
+      </div>
+      <span
+        className={`shrink-0 text-base font-bold ${
+          lesson.cancelled ? "text-muted line-through" : "text-navy"
+        }`}
+      >
+        {roomText(lesson.room)}
+      </span>
+    </div>
+  );
+}
+
 /** The small blue label at the top of the two upper cards. */
 function CardLabel({ icon, children }: { icon: IconName; children: string }) {
   return (
@@ -107,6 +212,8 @@ export function HomeView({
   yearChanged,
   lessons,
   closures,
+  minutes,
+  todayTimetable,
 }: {
   today: string;
   classes: ClassOption[];
@@ -115,6 +222,10 @@ export function HomeView({
   yearChanged: boolean;
   lessons: HomeLessons;
   closures: string[];
+  /** Minutes since midnight, Japan time: which period is running. */
+  minutes: number;
+  /** Today for the chosen class. null: no class chosen. */
+  todayTimetable: TimetableDay | null;
 }) {
   const next = lessons.kind === "ready" ? lessons.next : null;
   return (
@@ -144,8 +255,9 @@ export function HomeView({
       )}
 
       {/* One grid so that, below lg, the two lessons come one after the other
-          (いま, 次, 先生の位置, 休み・行事 — also the reading order). From lg the cards
-          are placed in two rows: いま | 先生の位置, then 次 | 休み・行事. */}
+          (いま, 次, 先生の位置, 休み・行事, 今日の時間割 — also the reading order). From lg
+          the cards are placed in three rows: いま | 先生の位置, then 次 | 休み・行事, then
+          今日の時間割 across both columns. */}
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.6fr)_minmax(280px,1fr)]">
         <CurrentLessonCard
           className="lg:col-start-1 lg:row-start-1"
@@ -220,6 +332,12 @@ export function HomeView({
             </div>
           )}
         </Card>
+        <TodayTimetableCard
+          className="lg:col-span-2 lg:row-start-3"
+          today={today}
+          minutes={minutes}
+          day={selectedClassId ? todayTimetable : null}
+        />
       </div>
     </>
   );
