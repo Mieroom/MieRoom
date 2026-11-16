@@ -13,7 +13,11 @@ import {
   type ReservationStatus,
   type SlotReservation,
 } from "@/lib/domain/reservation-core";
-import { blockerMessage, warningMessage } from "@/lib/domain/reservation-text";
+import {
+  applicantText,
+  blockerMessage,
+  warningMessage,
+} from "@/lib/domain/reservation-text";
 import { ALL_FREE, type SlotStatus } from "@/lib/domain/room-status";
 import {
   dateColumnToText,
@@ -212,6 +216,7 @@ const SELECT = {
   status: true,
   proxy: true,
   applicantName: true,
+  requesterName: true,
   handledByName: true,
   handledAt: true,
   createdAt: true,
@@ -228,6 +233,7 @@ type Item = {
   status: string;
   proxy: boolean;
   applicantName: string;
+  requesterName: string | null;
   handledByName: string | null;
   handledAt: Date | null;
   createdAt: Date;
@@ -283,7 +289,12 @@ async function toRows(
       room: item.room.name,
       purpose: item.purpose,
       note: item.note,
-      applicant: item.applicantName,
+      applicant: applicantText({
+        proxy: item.proxy,
+        applicantName: item.applicantName,
+        requesterName: item.requesterName,
+        handledByName: item.handledByName,
+      }),
       createdText: schoolDateTimeText(item.createdAt),
       status: status as ReservationStatus,
       handledBy: item.handledByName,

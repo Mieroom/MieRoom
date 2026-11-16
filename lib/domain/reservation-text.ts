@@ -78,3 +78,28 @@ export function warningMessage(warning: ApprovalWarning): string {
 export function blockIssueMessage(issue: BlockIssue): string {
   return issue.code === "ME301" ? MESSAGES.ME301 : MESSAGES.ME302;
 }
+
+/**
+ * 一覧の「申請者」の欄の文 (S07、S10、S11)。代理入力は、だれの予約か、だれが入れたかを出す。
+ * - 依頼者を文字で入れたもの: 「山田(代理入力: 岸本先生)」
+ * - 生徒を選んだもの (申請者が生徒): 「山田(代理入力: 岸本)」
+ * - 以前の代理入力 (申請者と対応した先生が同じ): 「岸本(代理入力)」
+ */
+export function applicantText(input: {
+  proxy: boolean;
+  applicantName: string;
+  requesterName: string | null;
+  handledByName: string | null;
+}): string {
+  if (!input.proxy) return input.applicantName;
+  if (input.requesterName) {
+    return `${input.requesterName}(代理入力: ${input.handledByName ?? input.applicantName})`;
+  }
+  if (
+    input.handledByName === null ||
+    input.handledByName === input.applicantName
+  ) {
+    return `${input.applicantName}(代理入力)`;
+  }
+  return `${input.applicantName}(代理入力: ${input.handledByName})`;
+}

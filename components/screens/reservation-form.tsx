@@ -17,9 +17,10 @@ import { PURPOSES, NOTE_MAX_LENGTH } from "@/lib/domain/reservation-core";
 import { SLOTS, type PeriodNo, type SlotNo } from "@/lib/domain/periods";
 import type { SlotStatus } from "@/lib/domain/room-status";
 import { MESSAGES, SYSTEM_ERROR_MESSAGE } from "@/lib/messages";
+import { RequesterField, type RequesterValue } from "./requester-field";
 import { SlotBadge } from "./rooms-view";
 
-type FieldName = "room" | "date" | "slots" | "purpose" | "note";
+type FieldName = "room" | "date" | "slots" | "purpose" | "note" | "requester";
 type Issue = { code: string; field: FieldName; message: string };
 
 const selectable = (status: SlotStatus) =>
@@ -114,6 +115,11 @@ export function ReservationForm({
   );
   const [purpose, setPurpose] = useState("");
   const [note, setNote] = useState("");
+  // S12 (代理入力) のとき: 依頼者。登録済みの生徒を選ぶか、名前を文字で入れる。
+  const [requester, setRequester] = useState<RequesterValue>({
+    id: null,
+    text: "",
+  });
   const [busy, setBusy] = useState(false);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [question, setQuestion] = useState<string | null>(null);
@@ -137,7 +143,14 @@ export function ReservationForm({
       slots: [...chosen].sort((a, b) => a - b),
       purpose,
       note,
-      ...(mode === "proxy" ? { confirmed } : {}),
+      ...(mode === "proxy"
+        ? {
+            confirmed,
+            ...(requester.id !== null
+              ? { requesterId: requester.id }
+              : { requesterName: requester.text }),
+          }
+        : {}),
     });
     if (result.kind === "ok") {
       router.push(`${successPath}?notice=${result.notice}`);
@@ -262,13 +275,21 @@ export function ReservationForm({
               ))}
             </select>
           </Field>
-          <Field label="申請者">
-            <input
-              readOnly
-              value={applicantLabel}
-              className={readOnlyFieldClass}
+          {mode === "proxy" ? (
+            <RequesterField
+              value={requester}
+              onChange={setRequester}
+              error={errorOf("requester")}
             />
-          </Field>
+          ) : (
+            <Field label="申請者">
+              <input
+                readOnly
+                value={applicantLabel}
+                className={readOnlyFieldClass}
+              />
+            </Field>
+          )}
           <Field
             label="備考"
             full

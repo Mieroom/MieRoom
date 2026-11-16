@@ -413,6 +413,9 @@ model Reservation {
   proxy         Boolean           @default(false) // 代理入力 (R4-9)
   applicantId   String
   applicantName String            @db.VarChar(100)
+  // 代理入力 (R4-9): 登録のない人 (まだログインしたことのない生徒) のために、先生が文字で入れた依頼者の名前。
+  // 生徒を選んだときは、申請者がその生徒になるので、空のまま。
+  requesterName String?           @db.VarChar(20)
   handledById   String?
   handledByName String?           @db.VarChar(100)
   handledAt     DateTime?

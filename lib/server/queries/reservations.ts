@@ -17,6 +17,7 @@ import {
   schoolDateTimeText,
   textToDateColumn,
 } from "@/lib/domain/school-date";
+import { applicantText } from "@/lib/domain/reservation-text";
 import { getDb } from "../db";
 
 // What the screens read out of 予約 and 使用止め (E14〜E16). Callers have checked who is signed in.
@@ -125,6 +126,7 @@ export async function listMyReservations(
       status: true,
       proxy: true,
       applicantName: true,
+      requesterName: true,
       handledByName: true,
       handledAt: true,
       createdAt: true,
@@ -148,7 +150,12 @@ export async function listMyReservations(
       room: row.room.name,
       purpose: row.purpose,
       note: row.note,
-      applicant: row.applicantName,
+      applicant: applicantText({
+        proxy: row.proxy,
+        applicantName: row.applicantName,
+        requesterName: row.requesterName,
+        handledByName: row.handledByName,
+      }),
       createdText: schoolDateTimeText(row.createdAt),
       status: effectiveStatus(toStored(row.status), date, slots, now),
       handledBy: row.handledByName,

@@ -31,7 +31,8 @@ export const UUID =
 
 export type IssueView = {
   code: string;
-  field: "room" | "date" | "slots" | "purpose" | "note" | "general";
+  field:
+    "room" | "date" | "slots" | "purpose" | "note" | "requester" | "general";
   message: string;
 };
 

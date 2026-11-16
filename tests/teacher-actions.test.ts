@@ -20,6 +20,10 @@ vi.mock("@/lib/server/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/server/queries/common", () => ({
   listSchoolClosures: vi.fn().mockResolvedValue([]),
 }));
+const students = vi.hoisted(() => ({ findSelectableStudent: vi.fn() }));
+vi.mock("@/lib/server/requesters", () => ({
+  findSelectableStudent: students.findSelectableStudent,
+}));
 const facts = vi.hoisted(() => ({ loadApprovalFacts: vi.fn() }));
 vi.mock("@/lib/server/queries/review", () => ({
   loadApprovalFacts: facts.loadApprovalFacts,
@@ -256,6 +260,7 @@ describe("createProxyReservation (代理入力)", () => {
     slots: ["5", "6"],
     purpose: "就活",
     note: "",
+    requesterName: "山田",
   };
 
   it("その場で承認済み。申請者も対応者も、ログイン中の先生。代理の印が付く", async () => {
@@ -269,9 +274,124 @@ describe("createProxyReservation (代理入力)", () => {
       proxy: true,
       applicantId: "teacher-1",
       applicantName: "田村 先生",
+      requesterName: "山田",
       handledById: "teacher-1",
       handledByName: "田村 先生",
       handledAt: NOW,
+    });
+  });
+
+  describe("依頼者 (R4-9)", () => {
+    beforeEach(() => students.findSelectableStudent.mockReset());
+
+    it("生徒を選ぶと、申請者がその生徒になる。対応した先生は、入れた先生のまま", async () => {
+      students.findSelectableStudent.mockResolvedValue({
+        id: "stu-1",
+        name: "山田 太郎",
+      });
+      const { requesterName: _ignored, ...base } = input;
+      void _ignored;
+      expect(
+        await createProxyReservation(
+          TEACHER,
+          { ...base, requesterId: "stu-1" },
+          false,
+          NOW,
+        ),
+      ).toEqual({ kind: "created", id: "new-id" });
+      expect(students.findSelectableStudent).toHaveBeenCalledWith(
+        "stu-1",
+        "teacher-1",
+      );
+      expect(db.reservation.create.mock.calls[0][0].data).toMatchObject({
+        status: "APPROVED",
+        proxy: true,
+        applicantId: "stu-1",
+        applicantName: "山田 太郎",
+        requesterName: null,
+        handledById: "teacher-1",
+        handledByName: "田村 先生",
+      });
+    });
+
+    it("選べない人 (生徒でない・いない・先生本人) は ME521。何も書かない", async () => {
+      students.findSelectableStudent.mockResolvedValue(null);
+      const { requesterName: _ignored, ...base } = input;
+      void _ignored;
+      expect(
+        await createProxyReservation(
+          TEACHER,
+          { ...base, requesterId: "someone" },
+          false,
+          NOW,
+        ),
+      ).toMatchObject({
+        kind: "invalid",
+        issues: [
+          { code: "ME521", field: "requester", message: MESSAGES.ME521 },
+        ],
+      });
+      expect(db.reservation.create).not.toHaveBeenCalled();
+    });
+
+    it("生徒を選んだら、文字の名前は使わない (選んだ生徒が優先)", async () => {
+      students.findSelectableStudent.mockResolvedValue({
+        id: "stu-1",
+        name: "山田 太郎",
+      });
+      await createProxyReservation(
+        TEACHER,
+        { ...input, requesterId: "stu-1", requesterName: "別の人" },
+        false,
+        NOW,
+      );
+      expect(db.reservation.create.mock.calls[0][0].data).toMatchObject({
+        applicantId: "stu-1",
+        requesterName: null,
+      });
+    });
+
+    it("選ばず、名前も空なら ME501 (必須)", async () => {
+      const { requesterName: _ignored, ...base } = input;
+      void _ignored;
+      for (const value of [undefined, "", "   ", "\u0000\n"]) {
+        const result = await createProxyReservation(
+          TEACHER,
+          { ...base, requesterName: value },
+          false,
+          NOW,
+        );
+        expect(result, String(value)).toMatchObject({
+          kind: "invalid",
+          issues: [
+            { code: "ME501", field: "requester", message: MESSAGES.ME501 },
+          ],
+        });
+      }
+      expect(db.reservation.create).not.toHaveBeenCalled();
+    });
+
+    it("名前は 20 文字まで (ME504)。前後の空白と制御文字は取る", async () => {
+      const long = await createProxyReservation(
+        TEACHER,
+        { ...input, requesterName: "あ".repeat(21) },
+        false,
+        NOW,
+      );
+      expect(long).toMatchObject({
+        kind: "invalid",
+        issues: [{ code: "ME504", message: MESSAGES.ME504(20) }],
+      });
+      expect(db.reservation.create).not.toHaveBeenCalled();
+      await createProxyReservation(
+        TEACHER,
+        { ...input, requesterName: "  \u0007" + "い".repeat(20) + " " },
+        false,
+        NOW,
+      );
+      expect(db.reservation.create.mock.calls[0][0].data.requesterName).toBe(
+        "い".repeat(20),
+      );
     });
   });
 

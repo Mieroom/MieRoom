@@ -9,8 +9,10 @@ import {
   checkBlockInput,
   lessonInBlock,
   normalizeInput,
+  normalizeRequesterName,
+  proxyInputSchema,
+  REQUESTER_NAME_MAX,
   reservationInBlock,
-  reservationInputSchema,
   type BlockRange,
 } from "@/lib/domain/reservation-core";
 import {
@@ -31,6 +33,7 @@ import { getDb } from "./db";
 import { listSchoolClosures } from "./queries/common";
 import { toStored } from "./queries/reservations";
 import { loadApprovalFacts } from "./queries/review";
+import { findSelectableStudent } from "./requesters";
 import { FIELD, loadFixedSlots, UUID, type IssueView } from "./reservations";
 import type { CurrentUser } from "./session";
 
@@ -184,9 +187,38 @@ export async function createProxyReservation(
   confirmed: boolean,
   now: Date,
 ): Promise<ProxyResult> {
-  const parsed = reservationInputSchema.safeParse(raw);
+  const parsed = proxyInputSchema.safeParse(raw);
   if (!parsed.success) return { kind: "bad_request" };
   const input = normalizeInput(parsed.data);
+
+  // 依頼者 (R4-9): 登録済みの生徒を選ぶか、名前を文字で入れる。どちらかが、必須。
+  let linked: { id: string; name: string } | null = null;
+  let requesterName: string | null = null;
+  const requesterIssues: IssueView[] = [];
+  const requesterId = parsed.data.requesterId?.trim() ?? "";
+  if (requesterId !== "") {
+    linked = await findSelectableStudent(requesterId, user.id);
+    if (linked === null) {
+      requesterIssues.push({
+        code: "ME521",
+        field: "requester",
+        message: MESSAGES.ME521,
+      });
+    }
+  } else {
+    const named = normalizeRequesterName(parsed.data.requesterName);
+    if (named.ok) requesterName = named.value;
+    else {
+      requesterIssues.push({
+        code: named.code,
+        field: "requester",
+        message:
+          named.code === "ME501"
+            ? MESSAGES.ME501
+            : MESSAGES.ME504(REQUESTER_NAME_MAX),
+      });
+    }
+  }
 
   const db = getDb();
   const room = UUID.test(input.roomId)
@@ -214,6 +246,8 @@ export async function createProxyReservation(
     field: FIELD[issue.code],
     message: applicationMessage(issue, { date: input.date, today }),
   }));
+
+  issues.push(...requesterIssues);
 
   let otherApproved = false;
   if (room !== null && issues.length === 0) {
@@ -252,8 +286,11 @@ export async function createProxyReservation(
       note: input.note,
       status: "APPROVED",
       proxy: true,
-      applicantId: user.id,
-      applicantName: user.name.slice(0, 100),
+      // 生徒を選んだときは、申請者がその生徒 (生徒の「自分の予約」に出る)。選ばないときは、
+      // 申請者は入れた先生で、依頼者の名前を文字で持つ。対応した先生は、どちらも入れた先生。
+      applicantId: linked?.id ?? user.id,
+      applicantName: (linked?.name ?? user.name).slice(0, 100),
+      requesterName,
       ...handled(user, now),
       slots: { create: input.slots.map((slot) => ({ slot })) },
     },
