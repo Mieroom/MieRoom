@@ -2,8 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from "react";
 import { signOutAction } from "@/app/login/actions";
+import { ConfirmDialog } from "@/components/ui/confirm-button";
 import type { Role } from "@/lib/auth/policy";
 import {
   activeItem,
@@ -33,6 +40,8 @@ export function AppShell({
   children: ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const [signingOut, startSignOut] = useTransition();
   const pathname = usePathname();
   const sections = menuFor(role);
   const current: NavItem | null = sampleScreenId
@@ -191,16 +200,26 @@ export function AppShell({
                 </span>
               </div>
               {!sampleScreenId && (
-                <form action={signOutAction}>
+                <>
                   <button
-                    type="submit"
+                    type="button"
                     aria-label="ログアウト"
                     title="ログアウト"
+                    onClick={() => setConfirmSignOut(true)}
                     className="inline-grid h-10 w-10 place-items-center rounded-lg border border-line bg-white hover:bg-[#f6f8fc]"
                   >
                     <Icon name="logout" />
                   </button>
-                </form>
+                  <ConfirmDialog
+                    open={confirmSignOut}
+                    message="ログアウトしますか?"
+                    confirmLabel="ログアウトする"
+                    cancelLabel="キャンセル"
+                    busy={signingOut}
+                    onYes={() => startSignOut(() => signOutAction())}
+                    onNo={() => setConfirmSignOut(false)}
+                  />
+                </>
               )}
             </div>
           </div>
