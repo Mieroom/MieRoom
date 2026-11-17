@@ -10,8 +10,8 @@ import {
   MINI_GAME_NAME,
   press as pressInGame,
   setPace,
-  START_MINUTE,
-  startGame,
+  startWake,
+  wakeView,
   stepGame,
   summarize,
   type Conditions,
@@ -21,6 +21,7 @@ import {
   type Pace,
   type Summary,
   type Weather,
+  type WakeView,
   WEATHER_NAMES,
 } from "@/lib/domain/mini-game";
 import { ART, CHARACTERS, drawScene } from "./mini-game-art";
@@ -36,7 +37,7 @@ const RESTART_LOCK_MS = 450;
 // 重いタブやバックグラウンドから戻ったとき、一気に進まないための 1 コマの上限 (秒)
 const MAX_FRAME = 1 / 30;
 
-type Phase = "ready" | "playing" | "arrived" | "late";
+type Phase = "ready" | "waking" | "playing" | "arrived" | "late";
 
 function readBest(): number {
   try {
@@ -222,10 +223,12 @@ export function MiniGame({
   const held = useRef({ left: false, right: false });
   const [character, setCharacter] = useState(0);
   // 今日の条件 (起きた時刻・天気)。毎回変わる
-  const [today, setToday] = useState<{ wake: number; weather: Weather }>({
-    wake: START_MINUTE,
+  const [today, setToday] = useState<{ weather: Weather }>({
     weather: "sunny",
   });
+  // 起床チャレンジ (目覚ましのバー) の結果の表示
+  const [wake, setWake] = useState<WakeView | null>(null);
+  const wakeKey = useRef("null");
   const [phase, setPhase] = useState<Phase>("ready");
   const [view, setView] = useState<EventView | null>(null);
   const [bestMargin, setBestMargin] = useState(0);
@@ -236,7 +239,7 @@ export function MiniGame({
   // 新しいゲームを作り、今日の条件を画面に出す
   const makeGame = useCallback(() => {
     const created = freshGame(kinds, conditions);
-    setToday({ wake: created.startMinute, weather: created.weather });
+    setToday({ weather: created.weather });
     return created;
   }, [kinds, conditions]);
 
@@ -259,20 +262,20 @@ export function MiniGame({
   const press = useCallback(() => {
     const state = game.current;
     if (state.status === "ready") {
-      startGame(state);
-      rememberRun(state);
-      setPhase("playing");
-    } else if (state.status === "playing") {
+      startWake(state);
+      setPhase("waking");
+    } else if (state.status === "waking" || state.status === "playing") {
       pressInGame(state);
     } else if (performance.now() - overAt.current > RESTART_LOCK_MS) {
       game.current = makeGame();
-      startGame(game.current);
-      rememberRun(game.current);
+      startWake(game.current);
       applyPace();
       setResult(null);
       setView(null);
+      setWake(null);
       viewKey.current = "null";
-      setPhase("playing");
+      wakeKey.current = "null";
+      setPhase("waking");
     }
   }, [applyPace, makeGame]);
 
@@ -312,8 +315,13 @@ export function MiniGame({
       last = now;
       const before = state.status;
       stepGame(state, dt);
+      if (before === "waking" && state.status === "playing") {
+        // 起きた: できごと (寝坊の日は、減ったあと) を覚えて、走り出す
+        rememberRun(state);
+        setPhase("playing");
+      }
       if (
-        before === "playing" &&
+        (before === "playing" || before === "waking") &&
         (state.status === "arrived" || state.status === "late")
       ) {
         overAt.current = now;
@@ -335,6 +343,12 @@ export function MiniGame({
         viewKey.current = key;
         setView(next);
       }
+      const wakeNow = wakeView(state);
+      const wakeText = JSON.stringify(wakeNow);
+      if (wakeText !== wakeKey.current) {
+        wakeKey.current = wakeText;
+        setWake(wakeNow);
+      }
       drawScene(ctx, state, CHARACTERS[characterIndex.current]);
       frame = requestAnimationFrame(loop);
     };
@@ -342,7 +356,10 @@ export function MiniGame({
 
     // 別のタブに移ったら、最初からにする (走りっぱなしで時間が過ぎないように)
     const onHidden = () => {
-      if (document.hidden && game.current.status === "playing") {
+      if (
+        document.hidden &&
+        (game.current.status === "playing" || game.current.status === "waking")
+      ) {
         game.current = makeGame();
         held.current = { left: false, right: false };
         setPhase("ready");
@@ -360,7 +377,9 @@ export function MiniGame({
       } else if (event.code === "ArrowLeft" || event.code === "ArrowRight") {
         event.preventDefault();
         const side = event.code === "ArrowLeft" ? "left" : "right";
-        if (state.status !== "playing") {
+        if (state.status === "waking") {
+          // 目覚ましの間は、何もしない
+        } else if (state.status !== "playing") {
           if (!event.repeat) changeCharacter(side === "left" ? -1 : 1);
         } else if (state.active !== null) {
           // できごとの最中は、選ぶ (走らない)
@@ -482,6 +501,39 @@ export function MiniGame({
           </div>
         )}
 
+        {/* 起床チャレンジ: 目覚ましを止める */}
+        {phase === "waking" && (
+          <div className="pointer-events-none absolute inset-x-0 top-[14%] flex justify-center">
+            <div className="flex min-w-[15rem] flex-col items-center gap-1 rounded-lg bg-[#1f2a44]/85 px-5 py-2 text-center text-white">
+              {wake?.stopped ? (
+                <>
+                  <p
+                    className={`text-lg font-bold tracking-widest ${
+                      wake.clock ? "text-[#ffe066]" : "text-[#ff7b8a]"
+                    }`}
+                  >
+                    {wake.label}
+                  </p>
+                  <p className="text-xs">
+                    {wake.clock
+                      ? `${wake.clock} 起床!`
+                      : "起きられなかった…遅刻確定"}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-base font-bold tracking-widest">
+                    目覚ましが鳴っている!
+                  </p>
+                  <p className="text-xs">
+                    タップ / スペースで止める(真ん中ほど早起き。端は二度寝!)
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 速さのボタン (スマホ用。押している間だけ効く) */}
         {phase === "playing" && !view && (
           <>
@@ -511,22 +563,20 @@ export function MiniGame({
         )}
 
         {/* 始める前と、終わったあと */}
-        {phase !== "playing" && (
+        {(phase === "ready" || over) && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <div className="flex max-w-[92%] flex-col items-center gap-1 rounded-lg bg-[#1f2a44]/85 px-5 py-3 text-center text-white">
               {phase === "ready" && (
                 <>
                   <p className="text-base font-bold tracking-widest">
-                    {clockText(today.wake)} 起床! {clockText(DEADLINE_MINUTE)}{" "}
-                    までに教室へ!
+                    {clockText(DEADLINE_MINUTE)} までに教室へ!
                   </p>
                   <p className="text-xs">
-                    タップ / スペースで スタート(ジャンプも同じ)
+                    タップ / スペースで スタート(まず、目覚ましを止めよう)
                   </p>
                   <p className="text-xs">
                     今日の天気: {WEATHER_NAMES[today.weather]}
                     {today.weather === "rain" && "(転ぶと長く止まる)"}
-                    {today.wake > START_MINUTE && "  ※寝坊!"}
                   </p>
                   <p className="text-xs opacity-80">
                     → ダッシュ(スタミナを使う) / ← ゆっくり(スタミナが戻る)

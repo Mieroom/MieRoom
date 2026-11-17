@@ -66,8 +66,44 @@ export const ROUTE_LENGTH = 15680;
 export const START_MINUTE = 8 * 60;
 export const DEADLINE_MINUTE = 9 * 60 + 15;
 
-/** 起きた時刻の候補 (分)。早起きは余裕があり、寝坊は厳しい。 */
-export const WAKE_OPTIONS = [7 * 60 + 50, 8 * 60, 8 * 60 + 10];
+/**
+ * 起床チャレンジ: 目覚ましのバーを、タイミングよく止める。真ん中ほど早く起きられて、余裕ができる。
+ * 端で止める (二度寝) と、即遅刻。バーの位置は 0〜1 で、真ん中が 0.5。
+ * until は、真ん中からの距離の上限 (この距離より近ければ、そのゾーン)。
+ */
+export const WAKE_ZONES = [
+  { until: 0.05, zone: "perfect", wake: 7 * 60 + 40, label: "完璧な目覚め!" },
+  { until: 0.14, zone: "good", wake: 7 * 60 + 50, label: "早起き!" },
+  { until: 0.24, zone: "normal", wake: 8 * 60, label: "ふつうの起床" },
+  { until: 0.34, zone: "late", wake: 8 * 60 + 10, label: "寝坊!" },
+  { until: 0.43, zone: "barely", wake: 8 * 60 + 20, label: "ぎりぎり起床…" },
+] as const;
+export type WakeZone = (typeof WAKE_ZONES)[number]["zone"] | "miss";
+/** 起きられる時刻の候補 (分)。 */
+export const WAKE_OPTIONS: number[] = WAKE_ZONES.map((item) => item.wake);
+/** 止めずに、この秒数がたつと、二度寝。 */
+export const WAKE_TIME_LIMIT = 8;
+/** 止めたあと、結果を見せる秒数。 */
+export const WAKE_PAUSE = 1.2;
+/** 目覚ましが鳴る時刻 (画面の表示用)。 */
+export const WAKE_ALARM_MINUTE = 7 * 60 + 30;
+/** この時刻以降に起きると、寝坊の日: 雨はくもりになり、できごとは 2 つまで。 */
+const LATE_WAKE = 8 * 60 + 10;
+
+/** バーの位置 (0〜1) から、どのゾーンか。 */
+export function wakeZoneAt(pos: number): {
+  zone: WakeZone;
+  wake: number | null;
+  label: string;
+} {
+  const distance = Math.abs(pos - 0.5);
+  for (const item of WAKE_ZONES) {
+    if (distance < item.until) {
+      return { zone: item.zone, wake: item.wake, label: item.label };
+    }
+  }
+  return { zone: "miss", wake: null, label: "二度寝!!" };
+}
 export type Weather = "sunny" | "cloudy" | "rain";
 export const WEATHER_NAMES: Record<Weather, string> = {
   sunny: "晴れ",
@@ -84,7 +120,7 @@ const WEATHER_WEIGHTS: Record<Weather, number> = {
 export const RAIN_STUN_SECONDS = 3;
 /** 道のりの長さは、毎回、これだけ (割合) の範囲で変わる。 */
 const ROUTE_VARIATION = 0.05;
-/** 同じ天気・同じ起床時刻が続くときの、選ばれにくさ。 */
+/** 同じ天気が続くときの、選ばれにくさ。 */
 const SAME_AS_LAST_PENALTY = 0.35;
 
 /** その日の条件 (毎回変わる)。 */
@@ -237,7 +273,7 @@ export type Obstacle = {
 export type Pace = "slow" | "normal" | "dash";
 
 export type GameState = {
-  status: "ready" | "playing" | "arrived" | "late";
+  status: "ready" | "waking" | "playing" | "arrived" | "late";
   /** 進んだ道のり (px) */
   distance: number;
   /** 足元の高さ (0 = 地面) */
@@ -255,8 +291,23 @@ export type GameState = {
   stamina: number;
   /** 息切れ中 (スタミナが空になってから、戻りきるまで) */
   exhausted: boolean;
-  /** 起きた時刻 (分)。時刻は、ここから進む */
+  /** 起きた時刻 (分)。時刻は、ここから進む。起床チャレンジで決まる */
   startMinute: number;
+  /** 起床チャレンジ (目覚ましのバー) */
+  wake: {
+    /** バーの往復の速さ (毎回、少し違う) */
+    speed: number;
+    elapsed: number;
+    /** バーの位置 (0〜1) */
+    pos: number;
+    stopped: boolean;
+    /** 止めてから、結果を見せている時間 (秒) */
+    pause: number;
+    zone: WakeZone | null;
+    label: string;
+  };
+  /** 二度寝して、起きられなかった (即遅刻) */
+  slept: boolean;
   weather: Weather;
   /** 家から教室までの道のり (px) */
   routeLength: number;
@@ -406,18 +457,12 @@ export function createGame(
     kinds?: EventKind[];
     /** 条件を決める (テスト用。決めなければ、ランダム) */
     conditions?: Partial<Conditions>;
-    /** 前回の条件。同じ天気・同じ起床時刻が続きにくくする */
-    previous?: { weather?: string; wake?: number };
+    /** 前回の条件。同じ天気が続きにくくする */
+    previous?: { weather?: string };
   } = {},
 ): GameState {
   const conditions = pickConditions(rand, options.previous, options.conditions);
-  // 寝坊の日は、できごとを 2 つまでにする
-  const events = pickEvents(
-    rand,
-    options.recent ?? [],
-    options.kinds,
-    conditions.wake > WAKE_OPTIONS[1] ? 2 : 3,
-  );
+  const events = pickEvents(rand, options.recent ?? [], options.kinds);
   const routeLength = conditions.routeLength;
 
   const minGap = RUN_SPEED * DASH_RATE * BOOST_RATE * (AIR_TIME + 0.12);
@@ -453,6 +498,16 @@ export function createGame(
     stamina: STAMINA_MAX,
     exhausted: false,
     startMinute: conditions.wake,
+    wake: {
+      speed: 1.1 + rand() * 0.5,
+      elapsed: 0,
+      pos: 0,
+      stopped: false,
+      pause: 0,
+      zone: null,
+      label: "",
+    },
+    slept: false,
     weather: conditions.weather,
     routeLength,
     obstacles,
@@ -508,12 +563,12 @@ function pickObstacleKind(rand: () => number, weather: Weather): ObstacleKind {
 }
 
 /**
- * その日の条件 (起きた時刻・天気・道のりの長さ)。前回と同じ天気・同じ起床時刻は、選ばれにくい。
- * 寝坊 (8:10) の雨の日は、厳しすぎるので、くもりにする。
+ * その日の条件 (天気・道のりの長さ)。前回と同じ天気は、選ばれにくい。
+ * 起きた時刻は、ここでは 8:00 にしておく (本当の時刻は、起床チャレンジで決まる)。
  */
 function pickConditions(
   rand: () => number,
-  previous: { weather?: string; wake?: number } | undefined,
+  previous: { weather?: string } | undefined,
   fixed: Partial<Conditions> | undefined,
 ): Conditions {
   const weighted = <T>(items: { value: T; weight: number }[]): T => {
@@ -525,17 +580,7 @@ function pickConditions(
     }
     return items[items.length - 1].value;
   };
-  const wake =
-    fixed?.wake ??
-    weighted(
-      WAKE_OPTIONS.map((value, index) => ({
-        value,
-        weight:
-          [0.3, 0.4, 0.3][index] *
-          (previous?.wake === value ? SAME_AS_LAST_PENALTY : 1),
-      })),
-    );
-  let weather =
+  const weather =
     fixed?.weather ??
     weighted(
       (Object.keys(WEATHER_WEIGHTS) as Weather[]).map((value) => ({
@@ -545,17 +590,10 @@ function pickConditions(
           (previous?.weather === value ? SAME_AS_LAST_PENALTY : 1),
       })),
     );
-  if (
-    fixed?.weather === undefined &&
-    wake > WAKE_OPTIONS[1] &&
-    weather === "rain"
-  ) {
-    weather = "cloudy";
-  }
   const routeLength =
     fixed?.routeLength ??
     Math.round(ROUTE_LENGTH * (1 + (rand() * 2 - 1) * ROUTE_VARIATION));
-  return { wake, weather, routeLength };
+  return { wake: fixed?.wake ?? START_MINUTE, weather, routeLength };
 }
 
 /** いまの時刻 (分。0:00 からの経過)。 */
@@ -574,6 +612,94 @@ export function stunSeconds(state: GameState): number {
 
 export function startGame(state: GameState): void {
   state.status = "playing";
+}
+
+/** 起床チャレンジを始める (ふとんの中で、目覚ましが鳴る。バーが動き出す)。 */
+export function startWake(state: GameState): void {
+  state.status = "waking";
+}
+
+/** 起きた時刻を決める。寝坊の日は、雨をくもりにし、できごとを 2 つまでにする。 */
+export function applyWake(state: GameState, wake: number): void {
+  state.startMinute = wake;
+  if (wake < LATE_WAKE) return;
+  if (state.weather === "rain") {
+    state.weather = "cloudy";
+    // 水たまりは、ごみ箱にする (くもりの日には、水たまりがないため)
+    for (const obstacle of state.obstacles) {
+      if (obstacle.kind === "puddle") {
+        obstacle.kind = "bin";
+        obstacle.width = 24;
+        obstacle.height = 30;
+      }
+    }
+  }
+  if (state.events.length > 2) state.events = state.events.slice(0, 2);
+}
+
+/** 目覚ましを止める (タップ / スペース)。止めた位置で、起きた時刻が決まる。 */
+export function pressWake(state: GameState): void {
+  const wake = state.wake;
+  if (state.status !== "waking" || wake.stopped) return;
+  wake.stopped = true;
+  wake.pause = 0;
+  const result = wakeZoneAt(wake.pos);
+  wake.zone = result.zone;
+  wake.label = result.label;
+}
+
+/** バーの位置: 0 → 1 → 0 と、一定の速さで往復する。 */
+function wakePosition(elapsed: number, speed: number): number {
+  const t = (elapsed * speed) % 2;
+  return t < 1 ? t : 2 - t;
+}
+
+function stepWake(state: GameState, dt: number): void {
+  const wake = state.wake;
+  if (!wake.stopped) {
+    wake.elapsed += dt;
+    wake.pos = wakePosition(wake.elapsed, wake.speed);
+    if (wake.elapsed >= WAKE_TIME_LIMIT) {
+      // 止めなかった: 二度寝
+      wake.stopped = true;
+      wake.pause = 0;
+      wake.zone = "miss";
+      wake.label = "二度寝!!";
+    }
+    return;
+  }
+  wake.pause += dt;
+  if (wake.pause < WAKE_PAUSE) return;
+  const zone = WAKE_ZONES.find((item) => item.zone === wake.zone);
+  if (zone === undefined) {
+    // 二度寝: 起きられず、即遅刻
+    state.slept = true;
+    state.status = "late";
+  } else {
+    applyWake(state, zone.wake);
+    state.status = "playing";
+  }
+}
+
+/** 起床チャレンジの表示用 (バーの位置、止めたか、結果)。 */
+export type WakeView = {
+  stopped: boolean;
+  zone: WakeZone | null;
+  label: string;
+  /** 起きた時刻 (二度寝のときは、null) */
+  clock: string | null;
+};
+
+export function wakeView(state: GameState): WakeView | null {
+  if (state.status !== "waking") return null;
+  const wake = state.wake;
+  const zone = WAKE_ZONES.find((item) => item.zone === wake.zone);
+  return {
+    stopped: wake.stopped,
+    zone: wake.zone,
+    label: wake.label,
+    clock: zone ? clockText(zone.wake) : null,
+  };
 }
 
 /** 押している速さを決める (画面のキー・ボタンから呼ぶ)。 */
@@ -617,6 +743,10 @@ export function jump(state: GameState): void {
 
 /** 押された (タップ / スペース): できごとの最中は、連打や合図。ふだんは、ジャンプ。 */
 export function press(state: GameState): void {
+  if (state.status === "waking") {
+    pressWake(state);
+    return;
+  }
   if (state.status !== "playing") return;
   const event = state.active;
   if (event === null) {
@@ -844,6 +974,10 @@ const START_PHASE = {
 
 /** dt 秒だけ進める。時刻は、いつでも進む (できごとの最中も、転んでいる間も)。 */
 export function stepGame(state: GameState, dt: number): void {
+  if (state.status === "waking") {
+    stepWake(state, dt);
+    return;
+  }
   if (state.status !== "playing") return;
   state.time += dt;
 
@@ -956,9 +1090,16 @@ export type Summary = {
 
 export function summarize(state: GameState): Summary {
   const arrived = state.status === "arrived";
-  const clock = Math.min(DEADLINE_MINUTE, clockMinute(state));
+  // 二度寝は、時間がたっていなくても、遅刻 (9:15)
+  const clock = state.slept
+    ? DEADLINE_MINUTE
+    : Math.min(DEADLINE_MINUTE, clockMinute(state));
   const notes: string[] = [];
   const { tags } = state;
+  if (state.slept) notes.push("二度寝してしまった…");
+  else if (state.wake.zone !== null) {
+    notes.push(`${clockText(state.startMinute)} 起床 (${state.wake.label})`);
+  }
   if (tags.scolded > 0)
     notes.push(`お母さんに ${Math.ceil(tags.scolded)} 秒 怒られた`);
   if (tags.helped) notes.push("おばさんを助けた(いい人)");

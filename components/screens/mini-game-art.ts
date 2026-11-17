@@ -4,6 +4,8 @@ import {
   BIKE_WINDOW,
   CROSSING_WAIT,
   DEADLINE_MINUTE,
+  WAKE_ALARM_MINUTE,
+  WAKE_ZONES,
   PLAYER,
   STAGE_STARTS,
   STAMINA_MAX,
@@ -1021,6 +1023,87 @@ function drawPlayer(
 
 // ---------------------------------------------------------------- 1 コマ
 
+const ZONE_COLOR: Record<string, string> = {
+  miss: "#d33b3b",
+  barely: "#ff7a4a",
+  late: "#ff9f4a",
+  normal: "#c8e06a",
+  good: "#6fd36f",
+  perfect: "#ffd84a",
+};
+const WAKE_BAR = { left: 60, width: 200, top: 46, height: 10 } as const;
+
+/** 目覚ましのバー: 真ん中ほど早起き。両端は二度寝 (赤)。白いマーカーが往復する。 */
+function drawWakeBar(ctx: CanvasRenderingContext2D, game: GameState) {
+  const { left, width, top, height } = WAKE_BAR;
+  rect(ctx, C.ink, left - 2, top - 2, width + 4, height + 4);
+  rect(ctx, ZONE_COLOR.miss, left, top, width, height);
+  // 外側のゾーンから順に、内側へ塗り重ねる
+  for (const item of [...WAKE_ZONES].reverse()) {
+    rect(
+      ctx,
+      ZONE_COLOR[item.zone],
+      left + (0.5 - item.until) * width,
+      top,
+      item.until * 2 * width,
+      height,
+    );
+  }
+  // マーカー (止めたら、点滅する)
+  const x = left + game.wake.pos * width;
+  const flash =
+    game.wake.stopped &&
+    Math.floor(game.time * 8 + game.wake.pause * 8) % 2 === 0;
+  rect(ctx, C.ink, x - 2, top - 6, 5, height + 12);
+  rect(ctx, flash ? C.gold : C.white, x - 1, top - 5, 3, height + 10);
+}
+
+/** ベッドのそばの目覚まし時計 (鳴っている間は、震える)。 */
+function drawAlarmClock(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  time: number,
+) {
+  const shake = Math.floor(time * 20) % 2;
+  const left = x + shake;
+  const top = GROUND - 14;
+  rect(ctx, "#d33b3b", left, top + 2, 10, 10);
+  rect(ctx, "#fff7e0", left + 1, top + 3, 8, 8);
+  rect(ctx, C.ink, left + 5, top + 4, 1, 4);
+  rect(ctx, C.ink, left + 5, top + 7, 3, 1);
+  rect(ctx, "#a02323", left, top, 3, 3); // ベル
+  rect(ctx, "#a02323", left + 7, top, 3, 3);
+  rect(ctx, "#5a4a3a", left + 1, GROUND - 2, 2, 2);
+  rect(ctx, "#5a4a3a", left + 7, GROUND - 2, 2, 2);
+  // 鳴っている線
+  if (shake === 0) {
+    rect(ctx, C.gold, left - 3, top + 3, 1, 2);
+    rect(ctx, C.gold, left + 12, top + 3, 1, 2);
+  } else {
+    rect(ctx, C.gold, left - 4, top + 6, 1, 2);
+    rect(ctx, C.gold, left + 13, top + 6, 1, 2);
+  }
+}
+
+/** ねむけ (Zzz)。 */
+function drawSleepy(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  time: number,
+) {
+  const lift = Math.floor(time * 3) % 3;
+  for (let k = 0; k < 3; k++) {
+    const size = 2 + k;
+    const zx = x + k * 5;
+    const zy = y - k * 5 - lift;
+    rect(ctx, C.white, zx, zy, size + 1, 1);
+    rect(ctx, C.white, zx + size, zy + 1, 1, 1);
+    rect(ctx, C.white, zx + size - 1, zy + 2, 1, 1);
+    rect(ctx, C.white, zx, zy + size, size + 1, 1);
+  }
+}
+
 /** 場面の区間 [from, to) だけに、描く範囲を絞る (境目は、ドアと校門が隠す)。 */
 function clipped(
   ctx: CanvasRenderingContext2D,
@@ -1040,7 +1123,9 @@ function clipped(
 }
 
 function drawHud(ctx: CanvasRenderingContext2D, game: GameState) {
-  const minute = clockMinute(game);
+  // 起床チャレンジの間は、目覚ましの時刻を出す
+  const minute =
+    game.status === "waking" ? WAKE_ALARM_MINUTE : clockMinute(game);
   const remaining = DEADLINE_MINUTE - minute;
   rect(ctx, C.ceiling, 0, 0, ART.width, CEILING);
   // いまの時刻 (締め切りが近づくと、赤くなる)
@@ -1115,8 +1200,9 @@ export function drawScene(
     );
   }
 
-  // できごとの小道具
-  for (const event of game.events) {
+  // できごとの小道具 (起床チャレンジの間は、まだ出さない)
+  const waking = game.status === "waking";
+  for (const event of waking ? [] : game.events) {
     if (event.kind === "mother") {
       drawMother(
         ctx,
@@ -1158,7 +1244,7 @@ export function drawScene(
     }
   }
   // 追ってくる犬
-  if (game.chase) {
+  if (game.chase && !waking) {
     // 犬との距離が縮むほど、キャラに近づく (最初の距離でも、画面の端に見える)
     drawDog(
       ctx,
@@ -1169,7 +1255,7 @@ export function drawScene(
   }
 
   // 障害物 (おばさんの体は、おばさんの絵で描く)
-  for (const obstacle of game.obstacles) {
+  for (const obstacle of waking ? [] : game.obstacles) {
     if (obstacle.body) continue;
     const x = edge(obstacle.at);
     if (x > -20 && x < ART.width + 4) {
@@ -1178,6 +1264,11 @@ export function drawScene(
   }
 
   drawPlayer(ctx, game, character);
+  if (waking) {
+    drawAlarmClock(ctx, 128, game.time);
+    drawSleepy(ctx, 44, GROUND - 24, game.time);
+    drawWakeBar(ctx, game);
+  }
   // 雨 (屋外だけ)
   if (game.weather === "rain") {
     clipped(ctx, homeEnd, schoolStart, () => drawRain(ctx, game.time));

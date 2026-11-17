@@ -49,7 +49,15 @@ import {
   TEACHER_MAX,
   TEACHER_TAPS,
   VENDING_SECONDS,
+  applyWake,
+  press as pressKey,
+  startWake,
+  wakeView,
+  wakeZoneAt,
   WAKE_OPTIONS,
+  WAKE_PAUSE,
+  WAKE_TIME_LIMIT,
+  WAKE_ZONES,
   type Weather,
   type EventKind,
   type GameState,
@@ -805,14 +813,14 @@ describe("今日の条件 (起きた時刻・天気・道のり・障害物)", (
   it("起きた時刻から、時刻が進む。早起きは余裕があり、寝坊は厳しい", () => {
     const early = createGame(fixed(0.5), {
       kinds: ["dog"],
-      conditions: { ...TODAY, wake: WAKE_OPTIONS[0] },
+      conditions: { ...TODAY, wake: 7 * 60 + 50 },
     });
     startGame(early);
-    expect(clockMinute(early)).toBe(WAKE_OPTIONS[0]);
+    expect(clockMinute(early)).toBe(7 * 60 + 50);
     expect(clockText(clockMinute(early))).toBe("7:50");
     const late = createGame(fixed(0.5), {
       kinds: ["dog"],
-      conditions: { ...TODAY, wake: WAKE_OPTIONS[2] },
+      conditions: { ...TODAY, wake: 8 * 60 + 10 },
     });
     startGame(late);
     late.events = [];
@@ -823,7 +831,7 @@ describe("今日の条件 (起きた時刻・天気・道のり・障害物)", (
     expect(late.status).toBe("late");
     const early2 = createGame(fixed(0.5), {
       kinds: ["dog"],
-      conditions: { ...TODAY, wake: WAKE_OPTIONS[0] },
+      conditions: { ...TODAY, wake: 7 * 60 + 50 },
     });
     startGame(early2);
     early2.events = [];
@@ -849,51 +857,31 @@ describe("今日の条件 (起きた時刻・天気・道のり・障害物)", (
     stepGame(rain, 0.016);
     expect(rain.stun).toBe(RAIN_STUN_SECONDS);
   });
-  it("条件は、毎回ランダム。範囲に収まり、3 種類の天気と 3 つの起床時刻が出る", () => {
+  it("条件は、毎回ランダム。道のりは範囲に収まり、3 種類の天気が出る。起きた時刻は、8:00 から", () => {
     const weathers = new Set<string>();
-    const wakes = new Set<number>();
     for (let seed = 0; seed < 400; seed++) {
       const state = createGame(seeded(seed));
       weathers.add(state.weather);
-      wakes.add(state.startMinute);
-      expect(WAKE_OPTIONS).toContain(state.startMinute);
+      expect(state.startMinute).toBe(START_MINUTE);
       expect(state.routeLength).toBeGreaterThanOrEqual(ROUTE_LENGTH * 0.95 - 1);
       expect(state.routeLength).toBeLessThanOrEqual(ROUTE_LENGTH * 1.05 + 1);
     }
     expect([...weathers].sort()).toEqual(["cloudy", "rain", "sunny"]);
-    expect([...wakes].sort()).toEqual([...WAKE_OPTIONS].sort());
   });
-  it("寝坊 (8:10) の日は、雨にならず、できごとは 2 つまで", () => {
-    for (let seed = 0; seed < 400; seed++) {
-      const state = createGame(seeded(seed), {
-        conditions: { wake: WAKE_OPTIONS[2] },
-      });
-      expect(state.weather).not.toBe("rain");
-      expect(state.events.length).toBeLessThanOrEqual(2);
-    }
-    // 条件を決めたときは、そのまま
-    expect(
-      createGame(fixed(0), {
-        conditions: { wake: WAKE_OPTIONS[2], weather: "rain" },
-      }).weather,
-    ).toBe("rain");
-  });
-  it("前回と同じ天気・同じ起床時刻は、出にくい", () => {
-    const share = (previous: { weather?: string; wake?: number }) => {
-      let rain = 0;
-      let wake = 0;
+  it("前回と同じ天気は、出にくい", () => {
+    const sunny = (previous: { weather?: string }) => {
+      let count = 0;
       for (let seed = 0; seed < 2000; seed++) {
-        const state = createGame(seeded(seed), { previous });
-        if (state.weather === "sunny") rain += 1;
-        if (state.startMinute === WAKE_OPTIONS[1]) wake += 1;
+        if (createGame(seeded(seed), { previous }).weather === "sunny") {
+          count += 1;
+        }
       }
-      return { sunny: rain, mid: wake };
+      return count;
     };
-    const plain = share({});
-    const after = share({ weather: "sunny", wake: WAKE_OPTIONS[1] });
-    expect(after.sunny).toBeLessThan(plain.sunny * 0.75);
-    expect(after.mid).toBeLessThan(plain.mid * 0.75);
-    expect(after.sunny).toBeGreaterThan(0);
+    const plain = sunny({});
+    const after = sunny({ weather: "sunny" });
+    expect(after).toBeLessThan(plain * 0.75);
+    expect(after).toBeGreaterThan(0);
   });
   it("障害物の種類: 水たまりは雨の日だけ。猫は雨の日に出ない。どれも、大きさは範囲の中", () => {
     const kindsIn = (weather: Weather) => {
@@ -945,5 +933,165 @@ describe("今日の条件 (起きた時刻・天気・道のり・障害物)", (
     stepGame(state, 1);
     expect(state.status).toBe("arrived");
     expect(state.distance).toBe(ROUTE_LENGTH - 700);
+  });
+});
+
+describe("起床チャレンジ (目覚ましのバー)", () => {
+  function waking(seedSpeed = 0): GameState {
+    // 速さの乱数を決める (0 → 1.1、1 → 1.6)
+    const state = createGame(fixed(seedSpeed), { conditions: TODAY });
+    startWake(state);
+    return state;
+  }
+  /** バーが、狙った位置に来るまで進めて、止める。 */
+  function stopAt(state: GameState, pos: number) {
+    let guard = 0;
+    while (Math.abs(state.wake.pos - pos) > 0.004 && guard++ < 5000) {
+      stepGame(state, 0.01);
+    }
+    pressKey(state);
+  }
+
+  it("真ん中に近いほど、早く起きられる。ゾーンの境目は、決めた距離", () => {
+    expect(wakeZoneAt(0.5)).toMatchObject({
+      zone: "perfect",
+      wake: 7 * 60 + 40,
+    });
+    expect(wakeZoneAt(0.5 + 0.049).zone).toBe("perfect");
+    expect(wakeZoneAt(0.5 + 0.06).zone).toBe("good");
+    expect(wakeZoneAt(0.5 - 0.2).zone).toBe("normal");
+    expect(wakeZoneAt(0.5 + 0.3).zone).toBe("late");
+    expect(wakeZoneAt(0.5 - 0.4).zone).toBe("barely");
+    expect(wakeZoneAt(0.5 + 0.45)).toMatchObject({ zone: "miss", wake: null });
+    expect(wakeZoneAt(0).zone).toBe("miss");
+    expect(wakeZoneAt(1).zone).toBe("miss");
+    // 起きられる時刻は、真ん中に近いほど早い
+    const wakes = WAKE_ZONES.map((item) => item.wake);
+    expect([...wakes].sort((a, b) => a - b)).toEqual(wakes);
+    expect(WAKE_OPTIONS).toEqual(wakes);
+  });
+  it("始めると、バーが 0 → 1 → 0 と往復する。速さは、毎回少し違う", () => {
+    const slow = waking(0);
+    const fast = waking(0.999);
+    expect(slow.status).toBe("waking");
+    expect(slow.wake.speed).toBeGreaterThanOrEqual(1.1);
+    expect(fast.wake.speed).toBeLessThanOrEqual(1.6);
+    expect(fast.wake.speed).toBeGreaterThan(slow.wake.speed);
+    stepGame(slow, 0.3);
+    expect(slow.wake.pos).toBeGreaterThan(0.2);
+    // 往復して、戻ってくる (折り返す)
+    let max = 0;
+    let wentBack = false;
+    for (let i = 0; i < 400; i++) {
+      const before = slow.wake.pos;
+      stepGame(slow, 0.01);
+      max = Math.max(max, slow.wake.pos);
+      if (slow.wake.pos < before) wentBack = true;
+      expect(slow.wake.pos).toBeGreaterThanOrEqual(0);
+      expect(slow.wake.pos).toBeLessThanOrEqual(1);
+    }
+    expect(max).toBeGreaterThan(0.95);
+    expect(wentBack).toBe(true);
+  });
+  it("バーが動いている間は、走らない (時刻も進まない)", () => {
+    const state = waking();
+    stepGame(state, 1);
+    expect(state.distance).toBe(0);
+    expect(state.time).toBe(0);
+  });
+  it("真ん中で止めると 7:40 起床。そのまま、走り出せる", () => {
+    const state = waking();
+    stopAt(state, 0.5);
+    expect(state.wake.zone).toBe("perfect");
+    expect(wakeView(state)).toMatchObject({ stopped: true, clock: "7:40" });
+    // 結果を見せている間は、まだ起きない
+    stepGame(state, WAKE_PAUSE - 0.3);
+    expect(state.status).toBe("waking");
+    stepGame(state, 0.5);
+    expect(state.status).toBe("playing");
+    expect(state.startMinute).toBe(7 * 60 + 40);
+    expect(clockText(clockMinute(state))).toBe("7:40");
+    expect(summarize(state).notes[0]).toBe("7:40 起床 (完璧な目覚め!)");
+  });
+  it("ゾーンごとに、起きた時刻が決まる", () => {
+    let inner = 0;
+    for (const item of WAKE_ZONES) {
+      const state = waking();
+      const pos = 0.5 + (inner + item.until) / 2; // そのゾーンの中ほど (バーの右側)
+      inner = item.until;
+      stopAt(state, pos);
+      expect(state.wake.zone, item.zone).toBe(item.zone);
+      stepGame(state, WAKE_PAUSE + 0.1);
+      expect(state.status).toBe("playing");
+      expect(state.startMinute).toBe(item.wake);
+    }
+  });
+  it("端で止めると二度寝: 即遅刻 (走らずに終わる)", () => {
+    const state = waking();
+    stopAt(state, 0.97);
+    expect(state.wake.zone).toBe("miss");
+    expect(wakeView(state)).toMatchObject({ clock: null, label: "二度寝!!" });
+    stepGame(state, WAKE_PAUSE + 0.1);
+    expect(state.status).toBe("late");
+    expect(state.slept).toBe(true);
+    const summary = summarize(state);
+    expect(summary).toMatchObject({
+      outcome: "late",
+      arrival: "9:15",
+      margin: 0,
+    });
+    expect(summary.remaining).toBeGreaterThan(1000);
+    expect(summary.notes).toEqual(["二度寝してしまった…"]);
+  });
+  it("止めずに 8 秒たつと、二度寝", () => {
+    const state = waking();
+    run(state, WAKE_TIME_LIMIT - 0.3, 0.05);
+    expect(state.status).toBe("waking");
+    expect(state.wake.stopped).toBe(false);
+    run(state, 0.5, 0.05);
+    expect(state.wake.zone).toBe("miss");
+    run(state, WAKE_PAUSE + 0.2, 0.05);
+    expect(state.status).toBe("late");
+    expect(state.slept).toBe(true);
+  });
+  it("止めたあとの、もう一度のタップは、何も変えない", () => {
+    const state = waking();
+    stopAt(state, 0.5);
+    const zone = state.wake.zone;
+    const pos = state.wake.pos;
+    pressKey(state);
+    pressKey(state);
+    stepGame(state, 0.05);
+    expect(state.wake.zone).toBe(zone);
+    expect(state.wake.pos).toBe(pos);
+  });
+  it("寝坊 (8:10 以降) の日は、雨はくもりに、水たまりはごみ箱に。できごとは 2 つまで", () => {
+    const state = createGame(fixed(0.5), {
+      kinds: ["mother", "dog", "crossing"],
+      conditions: { ...TODAY, weather: "rain" },
+    });
+    expect(state.weather).toBe("rain");
+    expect(state.events).toHaveLength(3);
+    state.obstacles.push({
+      kind: "puddle",
+      at: 5000,
+      width: 40,
+      height: 6,
+      hit: false,
+    });
+    applyWake(state, 8 * 60 + 10);
+    expect(state.weather).toBe("cloudy");
+    expect(state.events).toHaveLength(2);
+    expect(state.obstacles.some((item) => item.kind === "puddle")).toBe(false);
+    expect(stunSeconds(state)).toBe(STUN_SECONDS);
+  });
+  it("寝坊でない日 (8:00 まで) は、雨も、できごとも、そのまま", () => {
+    const state = createGame(fixed(0.5), {
+      kinds: ["mother", "dog", "crossing"],
+      conditions: { ...TODAY, weather: "rain" },
+    });
+    applyWake(state, 8 * 60);
+    expect(state.weather).toBe("rain");
+    expect(state.events).toHaveLength(3);
   });
 });
