@@ -68,7 +68,10 @@ export const DIFFICULTIES: Record<
   {
     name: string;
     /** 起床バーの、色のマスの数 (残りは、赤 = 二度寝。全部で 16) */
-    wakeCells: Record<"perfect" | "good" | "normal" | "late" | "barely", number>;
+    wakeCells: Record<
+      "perfect" | "good" | "normal" | "late" | "barely",
+      number
+    >;
     /** 起床バーの往復の速さ (1 秒に、バーの長さの何倍か) */
     wakeSpeed: { min: number; range: number };
     /** できごとの数 (最小・最大) */
@@ -117,6 +120,52 @@ export const DIFFICULTIES: Record<
 
 export function isDifficulty(value: unknown): value is Difficulty {
   return typeof value === "string" && value in DIFFICULTIES;
+}
+
+// ---------------------------------------------------------------- モード
+
+/**
+ * 通常: 起床チャレンジから始めて、9:15 までに着く。余裕と、いい行いで、点数がつく。
+ * タイムアタック: 8:00 に家を出て、教室までの時間を競う (起床チャレンジと、9:15 の締めはない)。
+ * コースは、その日の日付 (日本時間) で決まる。みんなが同じコースで、公平に比べられる。
+ */
+export type Mode = "normal" | "timeattack";
+export const MODE_IDS: Mode[] = ["normal", "timeattack"];
+export const MODE_NAMES: Record<Mode, string> = {
+  normal: "通常",
+  timeattack: "タイムアタック",
+};
+
+export function isMode(value: unknown): value is Mode {
+  return value === "normal" || value === "timeattack";
+}
+
+/** 日本時間の日付 (2026-11-17 の形)。タイムアタックのコースは、この日付で決まる。 */
+export function jstDayKey(now: Date): string {
+  return new Date(now.getTime() + 9 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+/** その日・その難易度のコースの種 (同じ入力なら、どの端末でも同じ数)。 */
+export function courseSeed(dayKey: string, difficulty: Difficulty): number {
+  let hash = 0x811c9dc5; // FNV-1a
+  for (const char of `${dayKey}|${difficulty}`) {
+    hash ^= char.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+/** 種から、0 以上 1 未満の数を順に返す関数 (mulberry32)。同じ種なら、同じ並び。 */
+export function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 /** 1 メートル = これだけ進んだ距離 (px)。 */
@@ -306,14 +355,20 @@ export type StairsState = {
 export const STAIR_KINDS = ["walker", "teacher", "friend"] as const;
 
 /** 階段の仕掛け: 階段が 1 つ増えるごとに、できごとを 1 つ (続けて同じ種類は避ける)。 */
-function makeStairs(rand: () => number, difficulty: Difficulty): StairsState | null {
+function makeStairs(
+  rand: () => number,
+  difficulty: Difficulty,
+): StairsState | null {
   const flights = DIFFICULTIES[difficulty].flights;
   if (flights <= 0) return null;
   const plan: StairEvent[] = [];
   let before: string | null = null;
   for (let k = 0; k < flights; k++) {
     const choices = STAIR_KINDS.filter((kind) => kind !== before);
-    const kind = choices[Math.min(choices.length - 1, Math.floor(rand() * choices.length))];
+    const kind =
+      choices[
+        Math.min(choices.length - 1, Math.floor(rand() * choices.length))
+      ];
     before = kind;
     plan.push({
       kind,
@@ -474,6 +529,7 @@ export type GameState = {
   /** 息切れ中 (スタミナが空になってから、戻りきるまで) */
   exhausted: boolean;
   difficulty: Difficulty;
+  mode: Mode;
   /** 校舎の階段 (むずかしいだけ。教室までの道のりが終わると、始まる) */
   stairs: StairsState | null;
   /** 起きた時刻 (分)。時刻は、ここから進む。起床チャレンジで決まる */
@@ -671,6 +727,8 @@ export function createGame(
     previous?: { weather?: string };
     /** 難易度 (決めなければ、ふつう) */
     difficulty?: Difficulty;
+    /** モード (決めなければ、通常) */
+    mode?: Mode;
   } = {},
 ): GameState {
   const difficulty = options.difficulty ?? "normal";
@@ -680,7 +738,12 @@ export function createGame(
     options.conditions,
     difficulty,
   );
-  const events = pickEvents(rand, options.recent ?? [], options.kinds, difficulty);
+  const events = pickEvents(
+    rand,
+    options.recent ?? [],
+    options.kinds,
+    difficulty,
+  );
   const routeLength = conditions.routeLength;
 
   const minGap = RUN_SPEED * DASH_RATE * BOOST_RATE * (AIR_TIME + 0.12);
@@ -716,6 +779,7 @@ export function createGame(
     stamina: STAMINA_MAX,
     exhausted: false,
     difficulty,
+    mode: options.mode ?? "normal",
     startMinute: conditions.wake,
     wake: wakeStart(rand, difficulty),
     slept: false,
@@ -1139,7 +1203,8 @@ function pressStairs(state: GameState, stairs: StairsState): void {
 /** 階段で選ぶ: 友達と、立ち話をするか。 */
 function chooseStairs(stairs: StairsState, option: 0 | 1): void {
   const event = stairs.event;
-  if (event === null || event.kind !== "friend" || event.phase !== "ask") return;
+  if (event === null || event.kind !== "friend" || event.phase !== "ask")
+    return;
   if (option === 0) {
     event.phase = "talk";
     event.elapsed = 0;
@@ -1203,7 +1268,10 @@ function stepStairs(state: GameState, stairs: StairsState, dt: number): void {
 
   if (stairs.steps >= stairs.flights * STAIR_STEPS) {
     state.status = "arrived";
-  } else if (clockMinute(state) >= DEADLINE_MINUTE) {
+  } else if (
+    state.mode !== "timeattack" &&
+    clockMinute(state) >= DEADLINE_MINUTE
+  ) {
     state.status = "late";
   }
 }
@@ -1491,13 +1559,69 @@ export function stepGame(state: GameState, dt: number): void {
     } else {
       state.status = "arrived";
     }
-  } else if (clockMinute(state) >= DEADLINE_MINUTE) {
+  } else if (
+    state.mode !== "timeattack" &&
+    clockMinute(state) >= DEADLINE_MINUTE
+  ) {
     state.status = "late";
   }
 }
 
+// ---------------------------------------------------------------- 点数 (通常モード)
+
+/** 余裕 1 分あたりの点。 */
+export const MARGIN_POINTS = 10;
+export type ScoreLine = { label: string; points: number };
+
+/** 点数の内訳: 余裕と、いい行い (プラス) と、悪い行い (マイナス)。 */
+export function scoreBreakdown(state: GameState, margin: number): ScoreLine[] {
+  const t = state.tags;
+  const lines: ScoreLine[] = [
+    { label: `余裕 ${margin} 分`, points: margin * MARGIN_POINTS },
+  ];
+  if (t.helped) lines.push({ label: "おばさんを助けた", points: 50 });
+  if (t.greeted) lines.push({ label: "校門であいさつした", points: 30 });
+  if (t.dogEscaped) lines.push({ label: "犬から逃げ切った", points: 20 });
+  if (t.bikeDodged) lines.push({ label: "自転車をよけた", points: 20 });
+  if (t.stairDodged > 0) {
+    lines.push({
+      label: `階段で人をよけた ×${t.stairDodged}`,
+      points: 15 * t.stairDodged,
+    });
+  }
+  if (t.ignored) lines.push({ label: "おばさんを見て見ぬふり", points: -30 });
+  if (t.stairScolded > 0) {
+    lines.push({
+      label: `階段で先生に怒られた ×${t.stairScolded}`,
+      points: -20 * t.stairScolded,
+    });
+  }
+  if (t.falls > 0) {
+    lines.push({ label: `転んだ ×${t.falls}`, points: -5 * t.falls });
+  }
+  return lines;
+}
+
+export type Grade = "S" | "A" | "B" | "C" | "D";
+
+/** 点数から、評価 (S〜D)。 */
+export function gradeOf(score: number): Grade {
+  if (score >= 600) return "S";
+  if (score >= 450) return "A";
+  if (score >= 300) return "B";
+  if (score >= 150) return "C";
+  return "D";
+}
+
 /** 終わったあとの、結果の文。 */
 export type Summary = {
+  mode: Mode;
+  /** 点数 (通常モードで着いたときだけ。マイナスにはならない。遅刻と、タイムアタックは 0) */
+  score: number;
+  grade: Grade | null;
+  breakdown: ScoreLine[];
+  /** 家を出てから教室に着くまで (秒。0.1 秒まで) */
+  elapsed: number;
   outcome: "arrived" | "late";
   /** 着いた時刻 (遅刻のときは、9:15) */
   arrival: string;
@@ -1544,15 +1668,28 @@ export function summarize(state: GameState): Summary {
   if (tags.stumbles > 0) notes.push(`階段でつまずいた ${tags.stumbles} 回`);
   if (tags.falls > 0) notes.push(`転んだ ${tags.falls} 回`);
   if (tags.exhausted > 0) notes.push(`息切れした ${tags.exhausted} 回`);
+  const scored = arrived && state.mode === "normal";
+  const margin = arrived ? Math.max(0, Math.floor(DEADLINE_MINUTE - clock)) : 0;
+  const breakdown = scored ? scoreBreakdown(state, margin) : [];
+  const score = Math.max(
+    0,
+    breakdown.reduce((sum, line) => sum + line.points, 0),
+  );
   return {
+    mode: state.mode,
+    score,
+    grade: scored ? gradeOf(score) : null,
+    breakdown,
+    elapsed: Math.round(state.time * 10) / 10,
     outcome: arrived ? "arrived" : "late",
     arrival: clockText(clock),
-    margin: arrived ? Math.max(0, Math.floor(DEADLINE_MINUTE - clock)) : 0,
+    margin,
     remaining:
       arrived || stairsOn
         ? 0
         : Math.ceil((state.routeLength - state.distance) / PX_PER_METER),
-    stairsFloor: state.stairs !== null && stairsOn ? floorOf(state.stairs) : null,
+    stairsFloor:
+      state.stairs !== null && stairsOn ? floorOf(state.stairs) : null,
     notes,
   };
 }

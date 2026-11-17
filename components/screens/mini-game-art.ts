@@ -1149,7 +1149,14 @@ function drawStairs(ctx: CanvasRenderingContext2D, game: GameState) {
     if (x > ART.width || x + STAIR.run < 0) continue;
     const top = topOf(n);
     if (top < ART.height) {
-      rect(ctx, n % 2 === 0 ? C.floorAlt : C.floor, x, top, STAIR.run, ART.height - top);
+      rect(
+        ctx,
+        n % 2 === 0 ? C.floorAlt : C.floor,
+        x,
+        top,
+        STAIR.run,
+        ART.height - top,
+      );
       rect(ctx, C.dust, x, top, STAIR.run, 1);
       rect(ctx, C.floorLine, x, top, 1, ART.height - top);
     }
@@ -1178,9 +1185,16 @@ function drawStairEvent(ctx: CanvasRenderingContext2D, game: GameState) {
   if (stairs === null || stairs.event === null) return;
   const event = stairs.event;
   // キャラの前の、坂の上に立たせる (k は、キャラからの段の数)
-  const person = (k: number, palette: Record<string, string>, bubble: "none" | "dots" | "talk") => {
+  const person = (
+    k: number,
+    palette: Record<string, string>,
+    bubble: "none" | "dots" | "talk",
+  ) => {
     ctx.save();
-    ctx.translate(Math.round(STAIR.x + k * STAIR.run - 3), -Math.round(k * STAIR.rise));
+    ctx.translate(
+      Math.round(STAIR.x + k * STAIR.run - 3),
+      -Math.round(k * STAIR.rise),
+    );
     drawPerson(ctx, 0, palette, bubble, game.time);
     ctx.restore();
   };
@@ -1197,7 +1211,11 @@ function drawStairEvent(ctx: CanvasRenderingContext2D, game: GameState) {
     rect(ctx, C.ink, 30, 22, 28, 4);
     rect(ctx, C.alert, 31, 23, Math.round(26 * left), 2);
   } else if (event.kind === "friend") {
-    person(3, friendColor(event.variant), event.phase === "talk" ? "talk" : "dots");
+    person(
+      3,
+      friendColor(event.variant),
+      event.phase === "talk" ? "talk" : "dots",
+    );
   }
 }
 
@@ -1224,10 +1242,16 @@ function drawHud(ctx: CanvasRenderingContext2D, game: GameState) {
   const minute =
     game.status === "waking" ? WAKE_ALARM_MINUTE : clockMinute(game);
   const remaining = DEADLINE_MINUTE - minute;
+  // タイムアタック: 時刻ではなく、家を出てからの時間 (分:秒)。締め切りはない
+  const attack = game.mode === "timeattack";
+  const seconds = Math.floor(game.time);
+  const clockLabel = attack
+    ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+    : clockText(minute);
   rect(ctx, C.ceiling, 0, 0, ART.width, CEILING);
   // いまの時刻 (締め切りが近づくと、赤くなる)
-  const late = remaining < 10;
-  drawText(ctx, clockText(minute), 6, 2, late ? C.alert : C.hud, 2);
+  const late = !attack && remaining < 10;
+  drawText(ctx, clockLabel, 6, 2, late ? C.alert : C.hud, 2);
   // スタミナ: ダッシュで減る。息切れのときは、赤く点滅する
   const gaugeLeft = 46;
   const gaugeWidth = 56;
@@ -1260,12 +1284,14 @@ function drawHud(ctx: CanvasRenderingContext2D, game: GameState) {
   const done = Math.round(barWidth * ratio);
   rect(ctx, C.gold, barLeft, 6, done, 3);
   rect(ctx, C.alert, barLeft + Math.min(barWidth - 2, done), 3, 2, 8);
-  // 締め切り (旗と時刻)
-  const limit = clockText(DEADLINE_MINUTE);
-  const textX = ART.width - 6 - textWidth(limit, 2);
-  drawText(ctx, limit, textX, 2, C.hud, 2);
-  rect(ctx, C.hud, textX - 8, 2, 1, 9);
-  rect(ctx, C.alert, textX - 7, 2, 5, 4);
+  // 締め切り (旗と時刻)。タイムアタックには、ない
+  if (!attack) {
+    const limit = clockText(DEADLINE_MINUTE);
+    const textX = ART.width - 6 - textWidth(limit, 2);
+    drawText(ctx, limit, textX, 2, C.hud, 2);
+    rect(ctx, C.hud, textX - 8, 2, 1, 9);
+    rect(ctx, C.alert, textX - 7, 2, 5, 4);
+  }
   // 階段: いまの階
   if (stairs !== null && stairs.on) {
     const label = `${floorOf(stairs)}F`;

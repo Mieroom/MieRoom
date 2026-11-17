@@ -51,6 +51,12 @@ import {
   VENDING_SECONDS,
   applyWake,
   buildWakeSegments,
+  courseSeed,
+  gradeOf,
+  isMode,
+  jstDayKey,
+  MODE_IDS,
+  seededRandom,
   climb,
   DIFFICULTY_IDS,
   floorOf,
@@ -1240,7 +1246,8 @@ describe("難易度 (かんたん / ふつう / むずかしい)", () => {
       const zones = new Set(
         buildWakeSegments(seeded2(9), id).map((item) => item.zone),
       );
-      for (const item of WAKE_ZONES) expect(zones.has(item.zone), id).toBe(true);
+      for (const item of WAKE_ZONES)
+        expect(zones.has(item.zone), id).toBe(true);
     }
   });
   it("バーの速さは、難しいほど速い", () => {
@@ -1276,8 +1283,12 @@ describe("難易度 (かんたん / ふつう / むずかしい)", () => {
   });
   it("道のりと、できごとの場所は、難易度に合わせて縮む。場面の切れ目も", () => {
     const hard = createGame(seeded2(4), { difficulty: "hard" });
-    expect(hard.routeLength).toBeLessThanOrEqual(ROUTE_LENGTH * 0.75 * 1.05 + 1);
-    expect(hard.routeLength).toBeGreaterThanOrEqual(ROUTE_LENGTH * 0.75 * 0.95 - 1);
+    expect(hard.routeLength).toBeLessThanOrEqual(
+      ROUTE_LENGTH * 0.75 * 1.05 + 1,
+    );
+    expect(hard.routeLength).toBeGreaterThanOrEqual(
+      ROUTE_LENGTH * 0.75 * 0.95 - 1,
+    );
     const easy = createGame(seeded2(4), { difficulty: "easy" });
     expect(easy.routeLength).toBeLessThan(ROUTE_LENGTH * 0.9 * 1.05 + 1);
     for (let seed = 0; seed < 100; seed++) {
@@ -1551,10 +1562,204 @@ describe("校舎の階段 (むずかしい)", () => {
     expect(summarize(state).notes).toContain("階段で人をよけた");
     expect(summarize(state).notes).toContain("階段で先生に怒られた");
     expect(
-      summarize(state).notes.some((note) => note.startsWith("階段でつまずいた")),
+      summarize(state).notes.some((note) =>
+        note.startsWith("階段でつまずいた"),
+      ),
     ).toBe(false);
     climb(state, "left");
     climb(state, "left");
     expect(summarize(state).notes).toContain("階段でつまずいた 1 回");
+  });
+});
+
+// ---------------------------------------------------------------- 点数とタイムアタック
+
+describe("モードと、その日のコース", () => {
+  it("日付は日本時間で決まる (UTC の 15:00 に、次の日になる)", () => {
+    expect(jstDayKey(new Date("2026-11-17T14:59:59Z"))).toBe("2026-11-17");
+    expect(jstDayKey(new Date("2026-11-17T15:00:00Z"))).toBe("2026-11-18");
+    expect(jstDayKey(new Date("2026-12-31T15:00:00Z"))).toBe("2027-01-01");
+    expect(jstDayKey(new Date("2026-02-28T15:00:00Z"))).toBe("2026-03-01");
+  });
+  it("コースの種は、日付と難易度で決まる。同じなら、いつも同じ", () => {
+    expect(courseSeed("2026-11-17", "hard")).toBe(
+      courseSeed("2026-11-17", "hard"),
+    );
+    expect(courseSeed("2026-11-17", "hard")).not.toBe(
+      courseSeed("2026-11-17", "easy"),
+    );
+    expect(courseSeed("2026-11-17", "hard")).not.toBe(
+      courseSeed("2026-11-18", "hard"),
+    );
+    const a = seededRandom(123);
+    const b = seededRandom(123);
+    for (let k = 0; k < 20; k++) {
+      const value = a();
+      expect(value).toBe(b());
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThan(1);
+    }
+  });
+  it("同じ日・同じ難易度なら、天気・できごと・障害物・階段が、まったく同じコース", () => {
+    for (const difficulty of DIFFICULTY_IDS) {
+      const make = () =>
+        createGame(seededRandom(courseSeed("2026-11-17", difficulty)), {
+          difficulty,
+          mode: "timeattack",
+        });
+      const first = make();
+      const second = make();
+      expect(first.weather).toBe(second.weather);
+      expect(first.routeLength).toBe(second.routeLength);
+      expect(first.events).toEqual(second.events);
+      expect(first.obstacles).toEqual(second.obstacles);
+      expect(first.stairs?.plan).toEqual(second.stairs?.plan);
+    }
+    // 日が変わると、コースが変わる
+    const days = new Set<string>();
+    for (let day = 1; day <= 20; day++) {
+      const state = createGame(
+        seededRandom(
+          courseSeed(`2026-11-${String(day).padStart(2, "0")}`, "normal"),
+        ),
+      );
+      days.add(
+        JSON.stringify(state.events.map((item) => item.kind)) +
+          state.routeLength,
+      );
+    }
+    expect(days.size).toBeGreaterThan(10);
+  });
+  it("モードは、決めなければ通常", () => {
+    expect(createGame(seededRandom(1)).mode).toBe("normal");
+    expect(createGame(seededRandom(1), { mode: "timeattack" }).mode).toBe(
+      "timeattack",
+    );
+    expect(isMode("timeattack")).toBe(true);
+    expect(isMode("x")).toBe(false);
+    expect(MODE_IDS).toEqual(["normal", "timeattack"]);
+  });
+  it("タイムアタック: 9:15 になっても遅刻にならず、着くまで続く。起きた時刻は 8:00", () => {
+    const state = createGame(fixed(0), {
+      kinds: [],
+      conditions: TODAY,
+      mode: "timeattack",
+    });
+    clearObstacles(state);
+    startGame(state);
+    expect(state.startMinute).toBe(8 * 60);
+    setPace(state, "slow");
+    run(state, 90);
+    expect(clockMinute(state)).toBeGreaterThan(DEADLINE_MINUTE);
+    expect(state.status).toBe("playing");
+    state.distance = state.routeLength - 5;
+    run(state, 1);
+    expect(state.status).toBe("arrived");
+    const summary = summarize(state);
+    expect(summary.outcome).toBe("arrived");
+    expect(summary.mode).toBe("timeattack");
+    expect(summary.score).toBe(0);
+    expect(summary.grade).toBeNull();
+    expect(summary.breakdown).toEqual([]);
+    expect(summary.elapsed).toBeGreaterThan(90);
+  });
+  it("タイムアタック: 階段でも、9:15 で遅刻にならない", () => {
+    const state = createGame(fixed(0), {
+      kinds: [],
+      conditions: TODAY,
+      difficulty: "hard",
+      mode: "timeattack",
+    });
+    clearObstacles(state);
+    startGame(state);
+    state.distance = state.routeLength - 5;
+    stepGame(state, 0.05);
+    expect(state.stairs?.on).toBe(true);
+    state.stairs!.plan.forEach((item) => (item.phase = "done"));
+    state.time = 100;
+    run(state, 1);
+    expect(state.status).toBe("playing");
+  });
+  it("通常モードは、これまでどおり 9:15 で遅刻", () => {
+    const state = createGame(fixed(0), { kinds: [], conditions: TODAY });
+    clearObstacles(state);
+    startGame(state);
+    setPace(state, "slow");
+    run(state, 80);
+    expect(state.status).toBe("late");
+  });
+});
+
+describe("点数 (通常モード)", () => {
+  /** 着いたゲーム。margin (余裕の分) は、時刻を合わせて作る。 */
+  function arrivedWith(
+    margin: number,
+    difficulty: Difficulty = "normal",
+  ): GameState {
+    const state = createGame(fixed(0), {
+      kinds: [],
+      conditions: TODAY,
+      difficulty,
+    });
+    clearObstacles(state);
+    startGame(state);
+    state.distance = state.routeLength - 1;
+    state.time = DEADLINE_MINUTE - state.startMinute - margin - 0.5;
+    stepGame(state, 0.05);
+    state.status = "arrived";
+    return state;
+  }
+  it("点数 = 余裕の分 × 10。いい行いは足され、悪い行いは引かれる", () => {
+    const plain = arrivedWith(30);
+    expect(summarize(plain).margin).toBe(30);
+    expect(summarize(plain).score).toBe(300);
+    expect(summarize(plain).breakdown).toEqual([
+      { label: "余裕 30 分", points: 300 },
+    ]);
+
+    const good = arrivedWith(30);
+    Object.assign(good.tags, {
+      helped: true,
+      greeted: true,
+      dogEscaped: true,
+      bikeDodged: true,
+      stairDodged: 2,
+    });
+    expect(summarize(good).score).toBe(300 + 50 + 30 + 20 + 20 + 30);
+
+    const bad = arrivedWith(30);
+    Object.assign(bad.tags, { ignored: true, stairScolded: 1, falls: 3 });
+    expect(summarize(bad).score).toBe(300 - 30 - 20 - 15);
+    const labels = summarize(bad).breakdown.map((line) => line.label);
+    expect(labels).toContain("おばさんを見て見ぬふり");
+    expect(labels).toContain("転んだ ×3");
+  });
+  it("点数は、マイナスにならない", () => {
+    const state = arrivedWith(0);
+    Object.assign(state.tags, { ignored: true, falls: 20 });
+    expect(summarize(state).score).toBe(0);
+  });
+  it("評価: 600 点で S、450 で A、300 で B、150 で C、それ未満は D", () => {
+    expect(gradeOf(600)).toBe("S");
+    expect(gradeOf(599)).toBe("A");
+    expect(gradeOf(450)).toBe("A");
+    expect(gradeOf(449)).toBe("B");
+    expect(gradeOf(300)).toBe("B");
+    expect(gradeOf(150)).toBe("C");
+    expect(gradeOf(149)).toBe("D");
+    expect(gradeOf(0)).toBe("D");
+    expect(summarize(arrivedWith(30)).grade).toBe("B");
+  });
+  it("遅刻と二度寝は、0 点で、評価もない", () => {
+    const state = createGame(fixed(0), { kinds: [], conditions: TODAY });
+    clearObstacles(state);
+    startGame(state);
+    setPace(state, "slow");
+    run(state, 80);
+    const summary = summarize(state);
+    expect(summary.outcome).toBe("late");
+    expect(summary.score).toBe(0);
+    expect(summary.grade).toBeNull();
+    expect(summary.breakdown).toEqual([]);
   });
 });

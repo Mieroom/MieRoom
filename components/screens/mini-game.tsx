@@ -5,13 +5,20 @@ import {
   choose,
   clockText,
   climb,
+  courseSeed,
   createGame,
   DEADLINE_MINUTE,
   DIFFICULTIES,
   DIFFICULTY_IDS,
   eventView,
   isDifficulty,
+  isMode,
+  jstDayKey,
   MINI_GAME_NAME,
+  MODE_IDS,
+  MODE_NAMES,
+  seededRandom,
+  startGame,
   press as pressInGame,
   setPace,
   startWake,
@@ -21,6 +28,7 @@ import {
   summarize,
   type Conditions,
   type Difficulty,
+  type Mode,
   type EventKind,
   type EventView,
   type GameState,
@@ -37,7 +45,8 @@ import { ART, CHARACTERS, drawScene } from "./mini-game-art";
 // 教室へ着く。道のとちゅうで、お母さん・倒れているおばさん・踏切のできごとが、ランダムに起きる。
 // 画面の中だけで動く (サーバー・DB は使わない)。音は出さない。ベストとキャラは、この端末にだけ残す。
 
-const BEST_KEY = "mieroom.miniGame.bestMargin";
+const BEST_KEY = "mieroom.miniGame.best";
+const MODE_KEY = "mieroom.miniGame.mode";
 const CHARACTER_KEY = "mieroom.miniGame.character";
 const DIFFICULTY_KEY = "mieroom.miniGame.difficulty";
 // 終わった直後の連打で、すぐ始まり直さないための待ち時間 (ミリ秒)
@@ -47,9 +56,36 @@ const MAX_FRAME = 1 / 30;
 
 type Phase = "ready" | "waking" | "playing" | "arrived" | "late";
 
-/** ふつうは、これまでのベストをそのまま使う。ほかは、難易度ごとに別に残す。 */
-function bestKey(difficulty: Difficulty): string {
-  return difficulty === "normal" ? BEST_KEY : `${BEST_KEY}.${difficulty}`;
+/** ベストは、モードと難易度ごとに別に残す。通常は点数、タイムアタックは 0.1 秒の数 (小さいほど良い)。 */
+function bestKey(mode: Mode, difficulty: Difficulty): string {
+  return `${BEST_KEY}.${mode}.${difficulty}`;
+}
+
+function readMode(): Mode {
+  try {
+    const value = window.localStorage.getItem(MODE_KEY);
+    return isMode(value) ? value : "normal";
+  } catch {
+    return "normal";
+  }
+}
+
+function writeMode(mode: Mode) {
+  try {
+    window.localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    // 保存できなくても、遊べる
+  }
+}
+
+/** タイム (0.1 秒の数) を「45.3 秒」の形に。 */
+function timeLabel(tenths: number): string {
+  return `${(tenths / 10).toFixed(1)} 秒`;
+}
+
+/** いい記録か: 通常は点数が高い、タイムアタックはタイムが短い。 */
+function beats(mode: Mode, value: number, best: number): boolean {
+  return mode === "timeattack" ? best === 0 || value < best : value > best;
 }
 
 function readDifficulty(): Difficulty {
@@ -69,18 +105,20 @@ function writeDifficulty(difficulty: Difficulty) {
   }
 }
 
-function readBest(difficulty: Difficulty): number {
+function readBest(mode: Mode, difficulty: Difficulty): number {
   try {
-    const value = Number(window.localStorage.getItem(bestKey(difficulty)));
+    const value = Number(
+      window.localStorage.getItem(bestKey(mode, difficulty)),
+    );
     return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
   } catch {
     return 0;
   }
 }
 
-function writeBest(difficulty: Difficulty, margin: number) {
+function writeBest(mode: Mode, difficulty: Difficulty, value: number) {
   try {
-    window.localStorage.setItem(bestKey(difficulty), String(margin));
+    window.localStorage.setItem(bestKey(mode, difficulty), String(value));
   } catch {
     // 保存できなくても、遊べる
   }
@@ -263,15 +301,27 @@ function rememberRun(state: GameState) {
 
 function freshGame(
   difficulty: Difficulty,
+  mode: Mode,
   kinds?: EventKind[],
   conditions?: Partial<Conditions>,
 ): GameState {
+  if (mode === "timeattack") {
+    // その日のコース: 日付 (日本時間) と難易度で決まる。みんなが同じコース
+    const seed = courseSeed(jstDayKey(new Date()), difficulty);
+    return createGame(seededRandom(seed), {
+      kinds,
+      conditions,
+      difficulty,
+      mode,
+    });
+  }
   return createGame(Math.random, {
     recent: readRecent(),
     previous: readLast(),
     kinds,
     conditions,
     difficulty,
+    mode,
   });
 }
 
@@ -289,12 +339,14 @@ export function MiniGame({
   const overAt = useRef(0);
   const characterIndex = useRef(0);
   const difficultyRef = useRef<Difficulty>("normal");
+  const modeRef = useRef<Mode>("normal");
   const viewKey = useRef("null");
   const stairsKey = useRef("null");
   // 押している向き (← ゆっくり / → ダッシュ)。キーと、画面のボタンの両方
   const held = useRef({ left: false, right: false });
   const [character, setCharacter] = useState(0);
   const [difficulty, setDifficulty] = useState<Difficulty>("normal");
+  const [mode, setMode] = useState<Mode>("normal");
   // 校舎の階段 (むずかしい) の表示
   const [stairs, setStairs] = useState<StairsView | null>(null);
   // 今日の条件 (起きた時刻・天気)。毎回変わる
@@ -313,7 +365,12 @@ export function MiniGame({
 
   // 新しいゲームを作り、今日の条件を画面に出す
   const makeGame = useCallback(() => {
-    const created = freshGame(difficultyRef.current, kinds, conditions);
+    const created = freshGame(
+      difficultyRef.current,
+      modeRef.current,
+      kinds,
+      conditions,
+    );
     setToday({ weather: created.weather });
     return created;
   }, [kinds, conditions]);
@@ -333,17 +390,26 @@ export function MiniGame({
     [applyPace],
   );
 
+  // 始める: 通常は、まず起床チャレンジ。タイムアタックは、すぐ走り出す
+  const begin = useCallback((state: GameState) => {
+    if (state.mode === "timeattack") {
+      startGame(state);
+      setPhase("playing");
+    } else {
+      startWake(state);
+      setPhase("waking");
+    }
+  }, []);
+
   // 押された: 始める / ジャンプ・連打・合図 / 終わったあとは、やり直す
   const press = useCallback(() => {
     const state = game.current;
     if (state.status === "ready") {
-      startWake(state);
-      setPhase("waking");
+      begin(state);
     } else if (state.status === "waking" || state.status === "playing") {
       pressInGame(state);
     } else if (performance.now() - overAt.current > RESTART_LOCK_MS) {
       game.current = makeGame();
-      startWake(game.current);
       applyPace();
       setResult(null);
       setView(null);
@@ -352,9 +418,9 @@ export function MiniGame({
       viewKey.current = "null";
       wakeKey.current = "null";
       stairsKey.current = "null";
-      setPhase("waking");
+      begin(game.current);
     }
-  }, [applyPace, makeGame]);
+  }, [applyPace, makeGame, begin]);
 
   // 選ぶ (助ける / 通り過ぎる、待つ / 渡る)
   const pick = useCallback((option: 0 | 1) => {
@@ -374,7 +440,23 @@ export function MiniGame({
       difficultyRef.current = next;
       setDifficulty(next);
       writeDifficulty(next);
-      const saved = readBest(next);
+      const saved = readBest(modeRef.current, next);
+      best.current = saved;
+      setBestMargin(saved);
+      if (status === "ready") game.current = makeGame();
+    },
+    [makeGame],
+  );
+
+  // モードを替える (通常 / タイムアタック)。ベストは、モードごとに別
+  const changeMode = useCallback(
+    (next: Mode) => {
+      const status = game.current.status;
+      if (status === "waking" || status === "playing") return;
+      modeRef.current = next;
+      setMode(next);
+      writeMode(next);
+      const saved = readBest(next, difficultyRef.current);
       best.current = saved;
       setBestMargin(saved);
       if (status === "ready") game.current = makeGame();
@@ -400,8 +482,11 @@ export function MiniGame({
     const savedDifficulty = readDifficulty();
     difficultyRef.current = savedDifficulty;
     setDifficulty(savedDifficulty);
+    const savedMode = readMode();
+    modeRef.current = savedMode;
+    setMode(savedMode);
     game.current = makeGame();
-    const savedBest = readBest(savedDifficulty);
+    const savedBest = readBest(savedMode, savedDifficulty);
     best.current = savedBest;
     setBestMargin(savedBest);
     const saved = readCharacter();
@@ -427,12 +512,18 @@ export function MiniGame({
       ) {
         overAt.current = now;
         const summary = summarize(state);
+        // 通常: 点数、タイムアタック: タイム (0.1 秒の数)
+        const value =
+          summary.mode === "timeattack"
+            ? Math.round(summary.elapsed * 10)
+            : summary.score;
         const isBest =
-          summary.outcome === "arrived" && summary.margin > best.current;
+          summary.outcome === "arrived" &&
+          beats(summary.mode, value, best.current);
         if (isBest) {
-          best.current = summary.margin;
-          writeBest(difficultyRef.current, summary.margin);
-          setBestMargin(summary.margin);
+          best.current = value;
+          writeBest(summary.mode, difficultyRef.current, value);
+          setBestMargin(value);
         }
         setResult({ ...summary, isBest });
         setPhase(state.status);
@@ -510,6 +601,14 @@ export function MiniGame({
           choose(state, event.code === "Digit1" ? 0 : 1);
         }
       }
+      // モード: 始める前と、終わったあとに、T でも切り替えられる
+      if (
+        event.code === "KeyT" &&
+        state.status !== "playing" &&
+        !event.repeat
+      ) {
+        changeMode(modeRef.current === "normal" ? "timeattack" : "normal");
+      }
       // 難易度: 始める前と、終わったあとに、1 / 2 / 3 でも選べる
       const digit = ["Digit1", "Digit2", "Digit3"].indexOf(event.code);
       if (digit >= 0 && state.status !== "playing" && !event.repeat) {
@@ -534,7 +633,15 @@ export function MiniGame({
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [press, changeCharacter, changeDifficulty, hold, applyPace, makeGame]);
+  }, [
+    press,
+    changeCharacter,
+    changeDifficulty,
+    changeMode,
+    hold,
+    applyPace,
+    makeGame,
+  ]);
 
   const over = phase === "arrived" || phase === "late";
   const message = view ? eventText(view) : null;
@@ -768,10 +875,14 @@ export function MiniGame({
               {phase === "ready" && (
                 <>
                   <p className="text-base font-bold tracking-widest">
-                    {clockText(DEADLINE_MINUTE)} までに教室へ!
+                    {mode === "timeattack"
+                      ? "タイムアタック: 最短で教室へ!"
+                      : `${clockText(DEADLINE_MINUTE)} までに教室へ!`}
                   </p>
                   <p className="text-xs">
-                    タップ / スペースで スタート(まず、目覚ましを止めよう)
+                    {mode === "timeattack"
+                      ? "タップ / スペースで スタート(今日のコースは、みんな同じ)"
+                      : "タップ / スペースで スタート(まず、目覚ましを止めよう)"}
                   </p>
                   <p className="text-xs">
                     今日の天気: {WEATHER_NAMES[today.weather]}
@@ -787,8 +898,11 @@ export function MiniGame({
                   )}
                   {bestMargin > 0 && (
                     <p className="text-xs opacity-80">
-                      ベスト({DIFFICULTIES[difficulty].name}): {bestMargin}{" "}
-                      分の余裕
+                      ベスト({MODE_NAMES[mode]}・{DIFFICULTIES[difficulty].name}
+                      ):{" "}
+                      {mode === "timeattack"
+                        ? timeLabel(bestMargin)
+                        : `${bestMargin} 点`}
                     </p>
                   )}
                 </>
@@ -800,23 +914,72 @@ export function MiniGame({
                   </p>
                   <p className="text-sm">
                     {result.outcome === "arrived"
-                      ? `${result.arrival} 着 (余裕 ${result.margin} 分)${
-                          result.isBest ? "  ベスト更新!" : ""
-                        }`
+                      ? result.mode === "timeattack"
+                        ? `タイム ${timeLabel(Math.round(result.elapsed * 10))}${
+                            result.isBest ? "  ベスト更新!" : ""
+                          }`
+                        : `評価 ${result.grade}  ${result.score} 点${
+                            result.isBest ? "  ベスト更新!" : ""
+                          }`
                       : result.stairsFloor !== null
                         ? `${result.arrival} に間に合わなかった (${result.stairsFloor} 階で時間切れ)`
                         : `${result.arrival} に間に合わなかった (あと ${result.remaining} m)`}
                   </p>
-                  {result.notes.length > 0 && (
-                    <ul className="text-[11px] opacity-85">
-                      {result.notes.map((note) => (
-                        <li key={note}>{note}</li>
+                  {result.breakdown.length > 0 ? (
+                    <ul className="grid grid-cols-2 gap-x-4 text-[11px] opacity-90">
+                      {result.breakdown.map((line) => (
+                        <li
+                          key={line.label}
+                          className="flex justify-between gap-2 text-left"
+                        >
+                          <span>{line.label}</span>
+                          <span
+                            className={
+                              line.points < 0
+                                ? "text-[#ff9aa5]"
+                                : "text-[#ffe066]"
+                            }
+                          >
+                            {line.points > 0 ? "+" : ""}
+                            {line.points}
+                          </span>
+                        </li>
                       ))}
                     </ul>
+                  ) : (
+                    result.notes.length > 0 && (
+                      <ul className="text-[11px] opacity-85">
+                        {result.notes.map((note) => (
+                          <li key={note}>{note}</li>
+                        ))}
+                      </ul>
+                    )
                   )}
                   <p className="text-xs">もう一度: タップ / スペース</p>
                 </>
               )}
+              <div
+                role="group"
+                aria-label="モード"
+                className="pointer-events-auto mt-1 flex items-center gap-1.5 text-xs"
+              >
+                {MODE_IDS.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={mode === id}
+                    onClick={() => changeMode(id)}
+                    className={`rounded-md px-3 py-1 font-bold ${
+                      mode === id
+                        ? "bg-[#ffe066] text-[#1f2a44]"
+                        : "bg-white/15 hover:bg-white/30"
+                    }`}
+                  >
+                    {MODE_NAMES[id]}
+                  </button>
+                ))}
+                <span className="text-[10px] opacity-60">T</span>
+              </div>
               <div
                 role="group"
                 aria-label="難易度"
@@ -872,7 +1035,9 @@ export function MiniGame({
       <p role="status" className="sr-only">
         {over && result
           ? result.outcome === "arrived"
-            ? `ゴール! ${result.arrival} 着。余裕 ${result.margin} 分。`
+            ? result.mode === "timeattack"
+              ? `ゴール! タイム ${result.elapsed} 秒。`
+              : `ゴール! ${result.arrival} 着。余裕 ${result.margin} 分。評価 ${result.grade}、${result.score} 点。`
             : `遅刻! ${result.arrival} に間に合わなかった。`
           : ""}
       </p>
