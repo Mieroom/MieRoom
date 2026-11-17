@@ -4,10 +4,16 @@ import {
   BIKE_WINDOW,
   CROSSING_WAIT,
   DEADLINE_MINUTE,
+  DIFFICULTIES,
+  floorOf,
+  STAIR_STEPS,
+  STAIR_TEACHER_STOP,
+  TOP_FLOOR,
   WAKE_ALARM_MINUTE,
   PLAYER,
   STAGE_STARTS,
   STAMINA_MAX,
+  WALKER_WINDOW,
   WORLD,
   type GameEvent,
   type GameState,
@@ -185,8 +191,12 @@ function drawWindow(ctx: CanvasRenderingContext2D, x: number) {
   rect(ctx, C.frame, x + 2, 34, 22, 2);
 }
 
-function drawDoor(ctx: CanvasRenderingContext2D, x: number, room: number) {
-  const top = GROUND - 40;
+function drawDoor(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  room: number | string,
+  top = GROUND - 40,
+) {
   rect(ctx, C.plate, x + 1, top - 9, 14, 7);
   drawText(ctx, String(room), x + 2, top - 8, C.ink);
   rect(ctx, C.doorDark, x, top, 16, 40);
@@ -965,11 +975,17 @@ function drawPlayer(
       if (color) rect(ctx, color, x0 + col, bodyTop + rowIndex, 1, 1);
     }
   });
-  const moving =
-    game.status === "playing" && game.active === null && game.stun <= 0;
-  const frame = moving
-    ? Math.floor(game.time * (game.exhausted ? 4 : 10)) % 2
-    : 0;
+  const stairs = game.stairs !== null && game.stairs.on ? game.stairs : null;
+  const moving = stairs
+    ? game.status === "playing" &&
+      game.stun <= 0 &&
+      game.time - stairs.lastStepAt < 0.18
+    : game.status === "playing" && game.active === null && game.stun <= 0;
+  const frame = stairs
+    ? stairs.steps % 2
+    : moving
+      ? Math.floor(game.time * (game.exhausted ? 4 : 10)) % 2
+      : 0;
   const air = game.y > 0;
   // 時計の針: 4 方向に、順に回る
   if (character.clock) {
@@ -1000,7 +1016,7 @@ function drawPlayer(
   rect(ctx, C.ink, left + legR, feet - b, 2, b);
   rect(ctx, C.ink, left + legR, feet - 1, 3, 1);
   // 走る土ぼこり
-  if (!air && moving) {
+  if (!air && moving && !stairs) {
     const puff = Math.floor(game.time * 18) % 3;
     rect(ctx, C.dust, left - 2 - puff * 2, GROUND - 2, 1, 1);
     rect(ctx, C.dust, left - 5 - puff * 2, GROUND - 1, 1, 1);
@@ -1097,6 +1113,94 @@ function drawSleepy(
   }
 }
 
+// ---------------------------------------------------------------- 校舎の階段 (むずかしい)
+
+/** 階段の 1 段: 横に 8 ドット、上に 5 ドット。キャラは、左から 36 ドットの所に立つ。 */
+const STAIR = { run: 8, rise: 5, x: 36 } as const;
+
+/** 上った段の数 (絵用): 1 段上がった直後は、少し手前から、なめらかに進む。 */
+function stairProgress(game: GameState): number {
+  const stairs = game.stairs;
+  if (stairs === null) return 0;
+  const ease = Math.max(0, 1 - (game.time - stairs.lastStepAt) / 0.1);
+  return Math.max(0, stairs.steps + stairs.partial - ease * 0.8);
+}
+
+function drawStairs(ctx: CanvasRenderingContext2D, game: GameState) {
+  const stairs = game.stairs;
+  if (stairs === null) return;
+  const total = stairs.flights * STAIR_STEPS;
+  const p = stairProgress(game);
+  const height = (n: number) => Math.min(Math.max(n, 0), total) * STAIR.rise;
+  const here = height(p);
+  const topOf = (n: number) => GROUND - (height(n) - here);
+  const leftOf = (n: number) => STAIR.x + (n - p) * STAIR.run;
+
+  // 壁
+  rect(ctx, C.wall, 0, CEILING, ART.width, ART.height - CEILING);
+  rect(ctx, C.wallTop, 0, CEILING, ART.width, 3);
+  tiles(p * 14, 0.5, 80, (x) => rect(ctx, C.lamp, x + 22, CEILING + 1, 30, 1));
+  tiles(p * 14, 0.4, 96, (x) => drawWindow(ctx, x + 20));
+
+  // 階
+  const first = Math.floor(p) - 5;
+  for (let n = first; n <= first + 50; n++) {
+    const x = leftOf(n);
+    if (x > ART.width || x + STAIR.run < 0) continue;
+    const top = topOf(n);
+    if (top < ART.height) {
+      rect(ctx, n % 2 === 0 ? C.floorAlt : C.floor, x, top, STAIR.run, ART.height - top);
+      rect(ctx, C.dust, x, top, STAIR.run, 1);
+      rect(ctx, C.floorLine, x, top, 1, ART.height - top);
+    }
+    // 手すり
+    rect(ctx, C.baseboard, x, top - 14, STAIR.run, 1);
+    if (n % 3 === 0) rect(ctx, C.baseboard, x + 3, top - 14, 1, 14);
+  }
+
+  // 階の札 (2F〜) と、6 階の教室
+  for (let floor = 2; floor <= TOP_FLOOR; floor++) {
+    const n = (floor - 1) * STAIR_STEPS;
+    const x = leftOf(n) - (floor === TOP_FLOOR ? 22 : 0);
+    const y = topOf(n) - 52;
+    if (x < -24 || x > ART.width) continue;
+    rect(ctx, C.ink, x - 2, y - 2, 22, 14);
+    rect(ctx, C.plate, x - 1, y - 1, 20, 12);
+    drawText(ctx, `${floor}F`, x + 2, y, C.ink, 2);
+  }
+  const doorX = leftOf(total) + 24;
+  if (doorX < ART.width) drawDoor(ctx, doorX, 201, topOf(total) - 40);
+}
+
+/** 階段のできごとの絵: 降りてくる人、止める先生、友達。 */
+function drawStairEvent(ctx: CanvasRenderingContext2D, game: GameState) {
+  const stairs = game.stairs;
+  if (stairs === null || stairs.event === null) return;
+  const event = stairs.event;
+  // キャラの前の、坂の上に立たせる (k は、キャラからの段の数)
+  const person = (k: number, palette: Record<string, string>, bubble: "none" | "dots" | "talk") => {
+    ctx.save();
+    ctx.translate(Math.round(STAIR.x + k * STAIR.run - 3), -Math.round(k * STAIR.rise));
+    drawPerson(ctx, 0, palette, bubble, game.time);
+    ctx.restore();
+  };
+  if (event.kind === "walker" && event.phase === "warn") {
+    // 上から、おりてくる
+    const progress = Math.min(1, event.elapsed / WALKER_WINDOW);
+    person(10 - progress * 8, friendColor(event.variant), "none");
+    rect(ctx, C.alert, 56, 30, 2, 6);
+    rect(ctx, C.alert, 56, 38, 2, 2);
+  } else if (event.kind === "teacher" && event.phase === "stop") {
+    person(3, teacherColor(event.variant), "talk");
+    // 止まっていなければいけない残り時間
+    const left = Math.max(0, 1 - event.elapsed / STAIR_TEACHER_STOP);
+    rect(ctx, C.ink, 30, 22, 28, 4);
+    rect(ctx, C.alert, 31, 23, Math.round(26 * left), 2);
+  } else if (event.kind === "friend") {
+    person(3, friendColor(event.variant), event.phase === "talk" ? "talk" : "dots");
+  }
+}
+
 /** 場面の区間 [from, to) だけに、描く範囲を絞る (境目は、ドアと校門が隠す)。 */
 function clipped(
   ctx: CanvasRenderingContext2D,
@@ -1147,7 +1251,13 @@ function drawHud(ctx: CanvasRenderingContext2D, game: GameState) {
   const barLeft = 112;
   const barWidth = 96;
   rect(ctx, "#4a5680", barLeft, 6, barWidth, 3);
-  const done = Math.round((barWidth * game.distance) / game.routeLength);
+  const road = game.distance / game.routeLength;
+  const stairs = game.stairs;
+  // 階段があるときは、道のりの 8 割 + 階段の 2 割
+  const ratio = stairs
+    ? 0.8 * road + (0.2 * stairs.steps) / (stairs.flights * STAIR_STEPS)
+    : road;
+  const done = Math.round(barWidth * ratio);
   rect(ctx, C.gold, barLeft, 6, done, 3);
   rect(ctx, C.alert, barLeft + Math.min(barWidth - 2, done), 3, 2, 8);
   // 締め切り (旗と時刻)
@@ -1156,6 +1266,13 @@ function drawHud(ctx: CanvasRenderingContext2D, game: GameState) {
   drawText(ctx, limit, textX, 2, C.hud, 2);
   rect(ctx, C.hud, textX - 8, 2, 1, 9);
   rect(ctx, C.alert, textX - 7, 2, 5, 4);
+  // 階段: いまの階
+  if (stairs !== null && stairs.on) {
+    const label = `${floorOf(stairs)}F`;
+    const x = Math.round(ART.width / 2 - textWidth(label, 3) / 2);
+    drawText(ctx, label, x + 1, 19, C.ink, 3);
+    drawText(ctx, label, x, 18, C.white, 3);
+  }
 }
 
 export function drawScene(
@@ -1165,9 +1282,20 @@ export function drawScene(
 ) {
   const d = game.distance / 2;
   const edge = (at: number) => screenX(at, game.distance);
-  const homeEnd = edge(STAGE_STARTS[1].from);
-  const schoolStart = edge(STAGE_STARTS[2].from);
+  // 場面の切れ目は、道のりの長さ (難易度) に合わせる
+  const scale = DIFFICULTIES[game.difficulty].routeScale;
+  const homeEnd = edge(STAGE_STARTS[1].from * scale);
+  const schoolStart = edge(STAGE_STARTS[2].from * scale);
   ctx.clearRect(0, 0, ART.width, ART.height);
+
+  // 校舎の階段 (むずかしい): 教室までの道のりが終わると、この絵になる
+  if (game.stairs !== null && game.stairs.on) {
+    drawStairs(ctx, game);
+    drawStairEvent(ctx, game);
+    drawPlayer(ctx, game, character);
+    drawHud(ctx, game);
+    return;
+  }
 
   // 場面ごとの背景
   clipped(ctx, -9999, homeEnd, () => drawHomeBg(ctx, d, game.weather));
@@ -1176,7 +1304,7 @@ export function drawScene(
   // 境目のドアと校門、ゴールの教室のドア
   drawHomeDoor(ctx, homeEnd);
   drawGate(ctx, schoolStart);
-  drawDoor(ctx, edge(game.routeLength + 20) - 8, 201);
+  drawDoor(ctx, edge(game.routeLength + 20) - 8, game.stairs ? "1F" : 201);
 
   const crossing = game.events.find((item) => item.kind === "crossing");
   // 電車 (踏切の向こうを、右から左へ通る)

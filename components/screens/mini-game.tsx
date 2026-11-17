@@ -4,21 +4,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   choose,
   clockText,
+  climb,
   createGame,
   DEADLINE_MINUTE,
+  DIFFICULTIES,
+  DIFFICULTY_IDS,
   eventView,
+  isDifficulty,
   MINI_GAME_NAME,
   press as pressInGame,
   setPace,
   startWake,
   wakeView,
+  stairsView,
   stepGame,
   summarize,
   type Conditions,
+  type Difficulty,
   type EventKind,
   type EventView,
   type GameState,
   type Pace,
+  type StairsView,
   type Summary,
   type Weather,
   type WakeView,
@@ -32,6 +39,7 @@ import { ART, CHARACTERS, drawScene } from "./mini-game-art";
 
 const BEST_KEY = "mieroom.miniGame.bestMargin";
 const CHARACTER_KEY = "mieroom.miniGame.character";
+const DIFFICULTY_KEY = "mieroom.miniGame.difficulty";
 // 終わった直後の連打で、すぐ始まり直さないための待ち時間 (ミリ秒)
 const RESTART_LOCK_MS = 450;
 // 重いタブやバックグラウンドから戻ったとき、一気に進まないための 1 コマの上限 (秒)
@@ -39,18 +47,40 @@ const MAX_FRAME = 1 / 30;
 
 type Phase = "ready" | "waking" | "playing" | "arrived" | "late";
 
-function readBest(): number {
+/** ふつうは、これまでのベストをそのまま使う。ほかは、難易度ごとに別に残す。 */
+function bestKey(difficulty: Difficulty): string {
+  return difficulty === "normal" ? BEST_KEY : `${BEST_KEY}.${difficulty}`;
+}
+
+function readDifficulty(): Difficulty {
   try {
-    const value = Number(window.localStorage.getItem(BEST_KEY));
+    const value = window.localStorage.getItem(DIFFICULTY_KEY);
+    return isDifficulty(value) ? value : "normal";
+  } catch {
+    return "normal";
+  }
+}
+
+function writeDifficulty(difficulty: Difficulty) {
+  try {
+    window.localStorage.setItem(DIFFICULTY_KEY, difficulty);
+  } catch {
+    // 保存できなくても、遊べる
+  }
+}
+
+function readBest(difficulty: Difficulty): number {
+  try {
+    const value = Number(window.localStorage.getItem(bestKey(difficulty)));
     return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
   } catch {
     return 0;
   }
 }
 
-function writeBest(margin: number) {
+function writeBest(difficulty: Difficulty, margin: number) {
   try {
-    window.localStorage.setItem(BEST_KEY, String(margin));
+    window.localStorage.setItem(bestKey(difficulty), String(margin));
   } catch {
     // 保存できなくても、遊べる
   }
@@ -137,6 +167,34 @@ function eventText(view: EventView): { title: string; hint: string } {
     : { title: "電車が遠い…", hint: "合図を待て(早すぎると危ない)" };
 }
 
+/** 階段のできごとの文 (variant で、毎回、せりふが変わる)。 */
+const STAIR_TITLES: Record<string, string[]> = {
+  walker: ["人がおりてくる!!", "ぶつかる!!", "走っておりてくる!!"],
+  teacher: ["走るな!!", "先生が見ている!", "廊下は走らない!"],
+  friend: ["友達に会った!", "クラスメイトが手を振っている!", "友達に呼ばれた!"],
+};
+
+function stairText(view: StairsView): { title: string; hint: string } | null {
+  if (view.kind === null) {
+    return view.intro
+      ? {
+          title: "階段だ! 教室は 6 階!",
+          hint: "← → を交互に押して上る(同じ側を続けるとつまずく)",
+        }
+      : null;
+  }
+  const title = STAIR_TITLES[view.kind][view.variant % 3];
+  if (view.kind === "walker") {
+    return { title, hint: "タップ / スペースでよける!" };
+  }
+  if (view.kind === "teacher") {
+    return { title, hint: "止まれ!(動くと怒られる)" };
+  }
+  return view.phase === "talk"
+    ? { title: "おしゃべり中…", hint: "おにぎりをもらう" }
+    : { title, hint: "立ち話する?(2.5 秒)" };
+}
+
 const CHOICES: Record<string, [string, string]> = {
   obasan: ["助ける", "通り過ぎる"],
   crossing: ["待つ", "渡る"],
@@ -204,6 +262,7 @@ function rememberRun(state: GameState) {
 }
 
 function freshGame(
+  difficulty: Difficulty,
   kinds?: EventKind[],
   conditions?: Partial<Conditions>,
 ): GameState {
@@ -212,6 +271,7 @@ function freshGame(
     previous: readLast(),
     kinds,
     conditions,
+    difficulty,
   });
 }
 
@@ -228,10 +288,15 @@ export function MiniGame({
   const best = useRef(0);
   const overAt = useRef(0);
   const characterIndex = useRef(0);
+  const difficultyRef = useRef<Difficulty>("normal");
   const viewKey = useRef("null");
+  const stairsKey = useRef("null");
   // 押している向き (← ゆっくり / → ダッシュ)。キーと、画面のボタンの両方
   const held = useRef({ left: false, right: false });
   const [character, setCharacter] = useState(0);
+  const [difficulty, setDifficulty] = useState<Difficulty>("normal");
+  // 校舎の階段 (むずかしい) の表示
+  const [stairs, setStairs] = useState<StairsView | null>(null);
   // 今日の条件 (起きた時刻・天気)。毎回変わる
   const [today, setToday] = useState<{ weather: Weather }>({
     weather: "sunny",
@@ -248,7 +313,7 @@ export function MiniGame({
 
   // 新しいゲームを作り、今日の条件を画面に出す
   const makeGame = useCallback(() => {
-    const created = freshGame(kinds, conditions);
+    const created = freshGame(difficultyRef.current, kinds, conditions);
     setToday({ weather: created.weather });
     return created;
   }, [kinds, conditions]);
@@ -283,8 +348,10 @@ export function MiniGame({
       setResult(null);
       setView(null);
       setWake(null);
+      setStairs(null);
       viewKey.current = "null";
       wakeKey.current = "null";
+      stairsKey.current = "null";
       setPhase("waking");
     }
   }, [applyPace, makeGame]);
@@ -293,6 +360,27 @@ export function MiniGame({
   const pick = useCallback((option: 0 | 1) => {
     choose(game.current, option);
   }, []);
+
+  // 階段で、足を出す (キー ← → と、画面のボタン)
+  const step = useCallback((side: "left" | "right") => {
+    climb(game.current, side);
+  }, []);
+
+  // 難易度を替える (始める前と、終わったあと)。選んだ難易度は、この端末に覚えておく
+  const changeDifficulty = useCallback(
+    (next: Difficulty) => {
+      const status = game.current.status;
+      if (status === "waking" || status === "playing") return;
+      difficultyRef.current = next;
+      setDifficulty(next);
+      writeDifficulty(next);
+      const saved = readBest(next);
+      best.current = saved;
+      setBestMargin(saved);
+      if (status === "ready") game.current = makeGame();
+    },
+    [makeGame],
+  );
 
   // キャラを替える (始める前と、終わったあと)。選んだキャラは、この端末に覚えておく
   const changeCharacter = useCallback((step: number) => {
@@ -309,8 +397,11 @@ export function MiniGame({
     const ctx = element?.getContext("2d");
     if (!element || !ctx) return;
     // 前回までのできごとを避けて、この回のゲームを作り直す (まだ始まっていない)
+    const savedDifficulty = readDifficulty();
+    difficultyRef.current = savedDifficulty;
+    setDifficulty(savedDifficulty);
     game.current = makeGame();
-    const savedBest = readBest();
+    const savedBest = readBest(savedDifficulty);
     best.current = savedBest;
     setBestMargin(savedBest);
     const saved = readCharacter();
@@ -340,7 +431,7 @@ export function MiniGame({
           summary.outcome === "arrived" && summary.margin > best.current;
         if (isBest) {
           best.current = summary.margin;
-          writeBest(summary.margin);
+          writeBest(difficultyRef.current, summary.margin);
           setBestMargin(summary.margin);
         }
         setResult({ ...summary, isBest });
@@ -352,6 +443,12 @@ export function MiniGame({
       if (key !== viewKey.current) {
         viewKey.current = key;
         setView(next);
+      }
+      const stairsNow = stairsView(state);
+      const stairsText = JSON.stringify(stairsNow);
+      if (stairsText !== stairsKey.current) {
+        stairsKey.current = stairsText;
+        setStairs(stairsNow);
       }
       const wakeNow = wakeView(state);
       const wakeText = JSON.stringify(wakeNow);
@@ -374,7 +471,9 @@ export function MiniGame({
         held.current = { left: false, right: false };
         setPhase("ready");
         setView(null);
+        setStairs(null);
         viewKey.current = "null";
+        stairsKey.current = "null";
       }
     };
     document.addEventListener("visibilitychange", onHidden);
@@ -391,6 +490,9 @@ export function MiniGame({
           // 目覚ましの間は、何もしない
         } else if (state.status !== "playing") {
           if (!event.repeat) changeCharacter(side === "left" ? -1 : 1);
+        } else if (state.stairs?.on === true) {
+          // 階段: 左右を、交互に
+          if (!event.repeat) climb(state, side);
         } else if (state.active !== null) {
           // できごとの最中は、選ぶ (走らない)
           if (!event.repeat) choose(state, side === "left" ? 0 : 1);
@@ -401,6 +503,11 @@ export function MiniGame({
         if (state.status === "playing") {
           choose(state, event.code === "Digit1" ? 0 : 1);
         }
+      }
+      // 難易度: 始める前と、終わったあとに、1 / 2 / 3 でも選べる
+      const digit = ["Digit1", "Digit2", "Digit3"].indexOf(event.code);
+      if (digit >= 0 && state.status !== "playing" && !event.repeat) {
+        changeDifficulty(DIFFICULTY_IDS[digit]);
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
@@ -421,11 +528,16 @@ export function MiniGame({
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [press, changeCharacter, hold, applyPace, makeGame]);
+  }, [press, changeCharacter, changeDifficulty, hold, applyPace, makeGame]);
 
   const over = phase === "arrived" || phase === "late";
   const message = view ? eventText(view) : null;
   const choices = view && view.phase === "ask" ? CHOICES[view.kind] : null;
+  const stairMessage = stairs ? stairText(stairs) : null;
+  const stairChoices =
+    stairs && stairs.kind === "friend" && stairs.phase === "ask"
+      ? CHOICES.friend
+      : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -511,6 +623,64 @@ export function MiniGame({
           </div>
         )}
 
+        {/* 校舎の階段 (むずかしい): 文と、足のボタン */}
+        {phase === "playing" && stairs && stairMessage && (
+          <div className="pointer-events-none absolute inset-x-0 top-[24%] flex justify-center">
+            <div className="flex min-w-[15rem] flex-col items-center gap-1 rounded-lg bg-[#1f2a44]/85 px-5 py-2 text-center text-white">
+              <p
+                className={`text-base font-bold tracking-widest ${
+                  stairs.kind === "walker" || stairs.kind === "teacher"
+                    ? "text-[#ffe066]"
+                    : ""
+                }`}
+              >
+                {stairMessage.title}
+              </p>
+              <p className="text-xs">{stairMessage.hint}</p>
+              {stairChoices && (
+                <div className="pointer-events-auto mt-1 flex gap-3">
+                  {stairChoices.map((label, index) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => pick(index === 0 ? 0 : 1)}
+                      className="rounded-md bg-white px-4 py-1.5 text-sm font-bold text-[#1f2a44] hover:bg-[#ffe066]"
+                    >
+                      {label}
+                      <span className="ml-1 text-[10px] font-normal opacity-60">
+                        {index === 0 ? "←" : "→"}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {phase === "playing" && stairs && (
+          <>
+            {(
+              [
+                ["left", "◀ 左足", "left-2"],
+                ["right", "右足 ▶", "right-2"],
+              ] as const
+            ).map(([side, label, position]) => (
+              <button
+                key={side}
+                type="button"
+                aria-label={label}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  step(side);
+                }}
+                className={`absolute bottom-2 ${position} touch-none select-none rounded-md bg-[#1f2a44]/70 px-5 py-3 text-sm font-bold text-white active:bg-[#4f5bd5]`}
+              >
+                {label}
+              </button>
+            ))}
+          </>
+        )}
+
         {/* 起床チャレンジ: 目覚ましを止める */}
         {phase === "waking" && (
           <div className="pointer-events-none absolute inset-x-0 top-[14%] flex justify-center">
@@ -558,7 +728,7 @@ export function MiniGame({
         )}
 
         {/* 速さのボタン (スマホ用。押している間だけ効く) */}
-        {phase === "playing" && !view && (
+        {phase === "playing" && !view && !stairs && (
           <>
             {(
               [
@@ -604,9 +774,15 @@ export function MiniGame({
                   <p className="text-xs opacity-80">
                     → ダッシュ(スタミナを使う) / ← ゆっくり(スタミナが戻る)
                   </p>
+                  {DIFFICULTIES[difficulty].flights > 0 && (
+                    <p className="text-xs text-[#ffe066]">
+                      教室は 6 階! 校舎の階段を、← → 交互に押して上る
+                    </p>
+                  )}
                   {bestMargin > 0 && (
                     <p className="text-xs opacity-80">
-                      ベスト: {bestMargin} 分の余裕
+                      ベスト({DIFFICULTIES[difficulty].name}): {bestMargin}{" "}
+                      分の余裕
                     </p>
                   )}
                 </>
@@ -621,7 +797,9 @@ export function MiniGame({
                       ? `${result.arrival} 着 (余裕 ${result.margin} 分)${
                           result.isBest ? "  ベスト更新!" : ""
                         }`
-                      : `${result.arrival} に間に合わなかった (あと ${result.remaining} m)`}
+                      : result.stairsFloor !== null
+                        ? `${result.arrival} に間に合わなかった (${result.stairsFloor} 階で時間切れ)`
+                        : `${result.arrival} に間に合わなかった (あと ${result.remaining} m)`}
                   </p>
                   {result.notes.length > 0 && (
                     <ul className="text-[11px] opacity-85">
@@ -633,6 +811,30 @@ export function MiniGame({
                   <p className="text-xs">もう一度: タップ / スペース</p>
                 </>
               )}
+              <div
+                role="group"
+                aria-label="難易度"
+                className="pointer-events-auto mt-1 flex items-center gap-1.5 text-xs"
+              >
+                {DIFFICULTY_IDS.map((id, index) => (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={difficulty === id}
+                    onClick={() => changeDifficulty(id)}
+                    className={`rounded-md px-3 py-1 font-bold ${
+                      difficulty === id
+                        ? "bg-[#ffe066] text-[#1f2a44]"
+                        : "bg-white/15 hover:bg-white/30"
+                    }`}
+                  >
+                    {DIFFICULTIES[id].name}
+                    <span className="ml-1 text-[10px] font-normal opacity-60">
+                      {index + 1}
+                    </span>
+                  </button>
+                ))}
+              </div>
               <div className="pointer-events-auto mt-1 flex items-center gap-3 text-sm">
                 <button
                   type="button"

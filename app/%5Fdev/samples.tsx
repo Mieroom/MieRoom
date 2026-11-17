@@ -381,10 +381,11 @@ function sampleKinds(value: string | undefined): EventKind[] | undefined {
   return kinds.length > 0 ? kinds : undefined;
 }
 
-/** ?weather=rain&wake=490 のように、天気と起床時刻 (分) を決めて遊ぶ (見本画面だけ)。 */
+/** ?weather=rain&wake=490&route=1500 のように、天気・起床時刻 (分)・道のりの長さ (px) を決めて遊ぶ (見本画面だけ)。 */
 function sampleConditions(
   weather: string | undefined,
   wake: string | undefined,
+  route: string | undefined,
 ): Partial<Conditions> | undefined {
   const result: Partial<Conditions> = {};
   if (weather === "sunny" || weather === "cloudy" || weather === "rain") {
@@ -392,6 +393,10 @@ function sampleConditions(
   }
   const minutes = Number(wake);
   if (WAKE_OPTIONS.includes(minutes)) result.wake = minutes;
+  const length = Number(route);
+  if (Number.isFinite(length) && length >= 800 && length <= 20000) {
+    result.routeLength = Math.round(length);
+  }
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
@@ -1012,7 +1017,11 @@ export function sampleFor(
           <MiniGameView
             backHref={`/_dev/s05?role=${role}`}
             kinds={sampleKinds(one(params.events))}
-            conditions={sampleConditions(one(params.weather), one(params.wake))}
+            conditions={sampleConditions(
+              one(params.weather),
+              one(params.wake),
+              one(params.route),
+            )}
           />
         ),
       };

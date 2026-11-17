@@ -57,6 +57,68 @@ export const RECOVER = 10; // ふだん (止まっているときも) に、1 �
 export const RECOVER_SLOW = 25; // ゆっくり歩いているとき
 export const RECOVER_AT = 30; // 息切れは、これまで戻ると終わる
 
+// ---------------------------------------------------------------- 難易度
+
+export type Difficulty = "easy" | "normal" | "hard";
+export const DIFFICULTY_IDS: Difficulty[] = ["easy", "normal", "hard"];
+
+/** 難易度ごとの決まり。ふつうが、これまでと同じ。 */
+export const DIFFICULTIES: Record<
+  Difficulty,
+  {
+    name: string;
+    /** 起床バーの、色のマスの数 (残りは、赤 = 二度寝。全部で 16) */
+    wakeCells: Record<"perfect" | "good" | "normal" | "late" | "barely", number>;
+    /** 起床バーの往復の速さ (1 秒に、バーの長さの何倍か) */
+    wakeSpeed: { min: number; range: number };
+    /** できごとの数 (最小・最大) */
+    eventCount: [number, number];
+    /** 寝坊 (8:15 以降) の日の、できごとの上限 */
+    lateEventCap: number;
+    /** ダッシュで減る、スタミナの割合 */
+    drain: number;
+    /** 道のりの長さの割合 (場面の切れ目とできごとの場所も、これに合わせる) */
+    routeScale: number;
+    /** 校舎の階段 (上る段の階の数。0 = 階段なし) */
+    flights: number;
+  }
+> = {
+  easy: {
+    name: "かんたん",
+    wakeCells: { perfect: 2, good: 3, normal: 2, late: 2, barely: 2 },
+    wakeSpeed: { min: 0.55, range: 0.2 },
+    eventCount: [1, 2],
+    lateEventCap: 2,
+    drain: 0.7,
+    routeScale: 0.9,
+    flights: 0,
+  },
+  normal: {
+    name: "ふつう",
+    wakeCells: { perfect: 1, good: 2, normal: 2, late: 2, barely: 2 },
+    wakeSpeed: { min: 0.7, range: 0.3 },
+    eventCount: [1, 3],
+    lateEventCap: 2,
+    drain: 1,
+    routeScale: 1,
+    flights: 0,
+  },
+  hard: {
+    name: "むずかしい",
+    wakeCells: { perfect: 1, good: 1, normal: 2, late: 1, barely: 2 },
+    wakeSpeed: { min: 0.9, range: 0.4 },
+    eventCount: [3, 4],
+    lateEventCap: 3,
+    drain: 1.3,
+    routeScale: 0.75,
+    flights: 5,
+  },
+};
+
+export function isDifficulty(value: unknown): value is Difficulty {
+  return typeof value === "string" && value in DIFFICULTIES;
+}
+
 /** 1 メートル = これだけ進んだ距離 (px)。 */
 export const PX_PER_METER = 12;
 /** 家から教室までの道のり (px)。まっすぐ走ると、約 56 秒。 */
@@ -85,8 +147,6 @@ export type WakeZone = (typeof WAKE_ZONES)[number]["zone"] | "miss";
 export type WakeSegment = { from: number; to: number; zone: WakeZone };
 /** 起きられる時刻の候補 (分)。 */
 export const WAKE_OPTIONS: number[] = WAKE_ZONES.map((item) => item.wake);
-/** バーの往復の速さ (1 秒に、バーの長さの何倍か)。毎回、この範囲で変わる。 */
-const WAKE_SPEED = { min: 0.7, range: 0.3 };
 /** 止めずに、この秒数がたつと、二度寝。 */
 export const WAKE_TIME_LIMIT = 8;
 /** 止めたあと、結果を見せる秒数。 */
@@ -97,10 +157,14 @@ export const WAKE_ALARM_MINUTE = 7 * 60 + 30;
 const LATE_WAKE = 8 * 60 + 15;
 
 /** バーの色の並び (毎回ランダム)。マスを並べ替えて、同じゾーンが続くところは、まとめる。 */
-export function buildWakeSegments(rand: () => number): WakeSegment[] {
+export function buildWakeSegments(
+  rand: () => number,
+  difficulty: Difficulty = "normal",
+): WakeSegment[] {
   const cells: WakeZone[] = [];
+  const counts = DIFFICULTIES[difficulty].wakeCells;
   for (const item of WAKE_ZONES) {
-    for (let k = 0; k < item.cells; k++) cells.push(item.zone);
+    for (let k = 0; k < counts[item.zone]; k++) cells.push(item.zone);
   }
   while (cells.length < WAKE_CELLS) cells.push("miss");
   for (let k = cells.length - 1; k > 0; k--) {
@@ -173,10 +237,11 @@ export const STAGE_STARTS: { stage: Stage; from: number }[] = [
   { stage: "school", from: 11800 },
 ];
 
-export function stageAt(distance: number): Stage {
+/** scale: 道のりの割合 (難易度)。ふつうは 1。 */
+export function stageAt(distance: number, scale = 1): Stage {
   let current: Stage = "home";
   for (const item of STAGE_STARTS)
-    if (distance >= item.from) current = item.stage;
+    if (distance >= item.from * scale) current = item.stage;
   return current;
 }
 
@@ -189,6 +254,90 @@ export function clockText(minutes: number): string {
 }
 
 // ---------------------------------------------------------------- できごと
+
+// ---------------------------------------------------------------- 校舎の階段 (むずかしい)
+
+/** 1 つの階段の段数 (1 階から 2 階へ、のように、1 つ上るのに必要な段)。 */
+export const STAIR_STEPS = 12;
+/** 教室がある階。1 階から数えるので、上る階段は、この数 − 1。 */
+export const TOP_FLOOR = 6;
+/** 階段の途中 (この段まで上ると) で、その階段のできごとが起きる。 */
+export const STAIR_EVENT_STEP = 6;
+/** 1 段上るたびに減る、スタミナ。 */
+export const STAIR_COST = 2.2;
+/** 同じ側を続けて押す (つまずく) と、止まる秒数。 */
+export const STAIR_STUMBLE = 0.7;
+/** 階段で人がおりてくる: よけられる秒数。 */
+export const WALKER_WINDOW = 1;
+/** 階段で先生に止められる: 動いてはいけない秒数。 */
+export const STAIR_TEACHER_STOP = 1.6;
+/** 先生に止められたのに動いた: 止まる秒数。 */
+export const STAIR_SCOLD_STUN = 1.5;
+/** 階段で友達と立ち話をする秒数。 */
+export const STAIR_FRIEND_SECONDS = 2.5;
+
+export type StairEvent = {
+  kind: "walker" | "teacher" | "friend";
+  /** 見た目・せりふの違い (0〜2)。毎回、ランダムに変わる */
+  variant: number;
+  phase: "idle" | "warn" | "stop" | "ask" | "talk" | "done";
+  elapsed: number;
+};
+
+export type StairsState = {
+  /** 階段に入った (教室までの道のりが終わった) */
+  on: boolean;
+  /** 上る階段の数 (階の数 − 1) */
+  flights: number;
+  /** 上った段の数 */
+  steps: number;
+  /** 息切れ中の、半端な段 (0〜1) */
+  partial: number;
+  /** 最後に押した側 (同じ側を続けて押すと、つまずく) */
+  last: "left" | "right" | null;
+  /** 最後に 1 段上がった時刻 (state.time)。足の動きに使う */
+  lastStepAt: number;
+  /** 階段ごとのできごと */
+  plan: StairEvent[];
+  /** 進行中のできごと (あるあいだは、上れない) */
+  event: StairEvent | null;
+};
+
+export const STAIR_KINDS = ["walker", "teacher", "friend"] as const;
+
+/** 階段の仕掛け: 階段が 1 つ増えるごとに、できごとを 1 つ (続けて同じ種類は避ける)。 */
+function makeStairs(rand: () => number, difficulty: Difficulty): StairsState | null {
+  const flights = DIFFICULTIES[difficulty].flights;
+  if (flights <= 0) return null;
+  const plan: StairEvent[] = [];
+  let before: string | null = null;
+  for (let k = 0; k < flights; k++) {
+    const choices = STAIR_KINDS.filter((kind) => kind !== before);
+    const kind = choices[Math.min(choices.length - 1, Math.floor(rand() * choices.length))];
+    before = kind;
+    plan.push({
+      kind,
+      variant: Math.min(2, Math.floor(rand() * 3)),
+      phase: "idle",
+      elapsed: 0,
+    });
+  }
+  return {
+    on: false,
+    flights,
+    steps: 0,
+    partial: 0,
+    last: null,
+    lastStepAt: -1,
+    plan,
+    event: null,
+  };
+}
+
+/** いまの階 (1 階から、TOP_FLOOR まで)。 */
+export function floorOf(stairs: StairsState): number {
+  return Math.min(TOP_FLOOR, 1 + Math.floor(stairs.steps / STAIR_STEPS));
+}
 
 /** 転んだときに止まる時間 (秒)。 */
 export const STUN_SECONDS = 2;
@@ -324,6 +473,9 @@ export type GameState = {
   stamina: number;
   /** 息切れ中 (スタミナが空になってから、戻りきるまで) */
   exhausted: boolean;
+  difficulty: Difficulty;
+  /** 校舎の階段 (むずかしいだけ。教室までの道のりが終わると、始まる) */
+  stairs: StairsState | null;
   /** 起きた時刻 (分)。時刻は、ここから進む。起床チャレンジで決まる */
   startMinute: number;
   /** 起床チャレンジ (目覚ましのバー) */
@@ -370,6 +522,11 @@ export type GameState = {
     bikeDodged: boolean;
     bikeHit: boolean;
     greeted: boolean;
+    stumbles: number;
+    stairDodged: number;
+    stairHit: number;
+    stairScolded: number;
+    stairChatted: boolean;
   };
 };
 
@@ -439,14 +596,23 @@ function pickEvents(
   rand: () => number,
   recent: string[][],
   forced?: EventKind[],
-  maxCount = 3,
+  difficulty: Difficulty = "normal",
 ): GameEvent[] {
+  const { eventCount, routeScale } = DIFFICULTIES[difficulty];
   let kinds: EventKind[];
   if (forced) {
     kinds = forced;
   } else {
     const r = rand();
-    const count = Math.min(maxCount, r < 0.15 ? 1 : r < 0.6 ? 2 : 3);
+    // ふつう: 1〜3 (1: 15%、2: 45%、3: 40%)。ほかは、最小と最大のあいだで、半々
+    const count =
+      difficulty === "normal"
+        ? r < 0.15
+          ? 1
+          : r < 0.6
+            ? 2
+            : 3
+        : eventCount[0] + (r < 0.5 ? 0 : eventCount[1] - eventCount[0]);
     const pool = EVENT_KINDS.map((kind) => {
       let weight = EVENT_SLOTS[kind].weight;
       RECENT_PENALTY.forEach((penalty, index) => {
@@ -468,11 +634,18 @@ function pickEvents(
     }
   }
   const events: GameEvent[] = [];
-  for (const kind of kinds) {
+  // 置ける場所がせまいものから置く (あとから置くものが、場所を取られて、減らないように)
+  const width = (kind: EventKind) =>
+    EVENT_SLOTS[kind].to - EVENT_SLOTS[kind].from;
+  for (const kind of [...kinds].sort((x, y) => width(x) - width(y))) {
     const slot = EVENT_SLOTS[kind];
-    for (let attempt = 0; attempt < 12; attempt++) {
-      const at = slot.from + rand() * (slot.to - slot.from);
-      if (events.every((item) => Math.abs(item.at - at) >= MIN_EVENT_GAP)) {
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const at = (slot.from + rand() * (slot.to - slot.from)) * routeScale;
+      if (
+        events.every(
+          (item) => Math.abs(item.at - at) >= MIN_EVENT_GAP * routeScale,
+        )
+      ) {
         events.push(makeEvent(kind, at, Math.floor(rand() * 3)));
         break;
       }
@@ -496,10 +669,18 @@ export function createGame(
     conditions?: Partial<Conditions>;
     /** 前回の条件。同じ天気が続きにくくする */
     previous?: { weather?: string };
+    /** 難易度 (決めなければ、ふつう) */
+    difficulty?: Difficulty;
   } = {},
 ): GameState {
-  const conditions = pickConditions(rand, options.previous, options.conditions);
-  const events = pickEvents(rand, options.recent ?? [], options.kinds);
+  const difficulty = options.difficulty ?? "normal";
+  const conditions = pickConditions(
+    rand,
+    options.previous,
+    options.conditions,
+    difficulty,
+  );
+  const events = pickEvents(rand, options.recent ?? [], options.kinds, difficulty);
   const routeLength = conditions.routeLength;
 
   const minGap = RUN_SPEED * DASH_RATE * BOOST_RATE * (AIR_TIME + 0.12);
@@ -534,8 +715,9 @@ export function createGame(
     pace: "normal",
     stamina: STAMINA_MAX,
     exhausted: false,
+    difficulty,
     startMinute: conditions.wake,
-    wake: wakeStart(rand),
+    wake: wakeStart(rand, difficulty),
     slept: false,
     weather: conditions.weather,
     routeLength,
@@ -543,6 +725,7 @@ export function createGame(
     events,
     active: null,
     chase: null,
+    stairs: makeStairs(rand, difficulty),
     tags: {
       scolded: 0,
       helped: false,
@@ -559,14 +742,23 @@ export function createGame(
       bikeDodged: false,
       bikeHit: false,
       greeted: false,
+      stumbles: 0,
+      stairDodged: 0,
+      stairHit: 0,
+      stairScolded: 0,
+      stairChatted: false,
     },
   };
 }
 
 /** 起床チャレンジの始まり: 色の並び、バーの速さ、動き出す位置を、ランダムに決める。 */
-function wakeStart(rand: () => number): GameState["wake"] {
-  const segments = buildWakeSegments(rand);
-  const speed = WAKE_SPEED.min + rand() * WAKE_SPEED.range;
+function wakeStart(
+  rand: () => number,
+  difficulty: Difficulty,
+): GameState["wake"] {
+  const segments = buildWakeSegments(rand, difficulty);
+  const { wakeSpeed } = DIFFICULTIES[difficulty];
+  const speed = wakeSpeed.min + rand() * wakeSpeed.range;
   const start = rand() * 2;
   return {
     speed,
@@ -617,6 +809,7 @@ function pickConditions(
   rand: () => number,
   previous: { weather?: string } | undefined,
   fixed: Partial<Conditions> | undefined,
+  difficulty: Difficulty = "normal",
 ): Conditions {
   const weighted = <T>(items: { value: T; weight: number }[]): T => {
     const total = items.reduce((sum, item) => sum + item.weight, 0);
@@ -639,7 +832,11 @@ function pickConditions(
     );
   const routeLength =
     fixed?.routeLength ??
-    Math.round(ROUTE_LENGTH * (1 + (rand() * 2 - 1) * ROUTE_VARIATION));
+    Math.round(
+      ROUTE_LENGTH *
+        DIFFICULTIES[difficulty].routeScale *
+        (1 + (rand() * 2 - 1) * ROUTE_VARIATION),
+    );
   return { wake: fixed?.wake ?? START_MINUTE, weather, routeLength };
 }
 
@@ -681,7 +878,8 @@ export function applyWake(state: GameState, wake: number): void {
       }
     }
   }
-  if (state.events.length > 2) state.events = state.events.slice(0, 2);
+  const cap = DIFFICULTIES[state.difficulty].lateEventCap;
+  if (state.events.length > cap) state.events = state.events.slice(0, cap);
 }
 
 /** 目覚ましを止める (タップ / スペース)。止めた位置で、起きた時刻が決まる。 */
@@ -764,7 +962,7 @@ function paceRate(state: GameState): number {
 
 function updateStamina(state: GameState, dt: number, dashing: boolean): void {
   if (dashing) {
-    state.stamina -= STAMINA_DRAIN * dt;
+    state.stamina -= STAMINA_DRAIN * DIFFICULTIES[state.difficulty].drain * dt;
     if (state.stamina <= 0) {
       state.stamina = 0;
       state.exhausted = true;
@@ -780,6 +978,7 @@ function updateStamina(state: GameState, dt: number, dashing: boolean): void {
 export function jump(state: GameState): void {
   if (
     state.status === "playing" &&
+    state.stairs?.on !== true &&
     state.active === null &&
     state.stun <= 0 &&
     state.y === 0
@@ -795,6 +994,10 @@ export function press(state: GameState): void {
     return;
   }
   if (state.status !== "playing") return;
+  if (state.stairs?.on === true) {
+    pressStairs(state, state.stairs);
+    return;
+  }
   const event = state.active;
   if (event === null) {
     jump(state);
@@ -825,6 +1028,10 @@ export function press(state: GameState): void {
 /** 選ぶ: 0 = 左の選択肢 (助ける / 待つ)、1 = 右の選択肢 (通り過ぎる / 渡る)。 */
 export function choose(state: GameState, option: 0 | 1): void {
   if (state.status !== "playing") return;
+  if (state.stairs?.on === true) {
+    chooseStairs(state.stairs, option);
+    return;
+  }
   const event = state.active;
   if (event === null) return;
   if (event.kind === "obasan" && event.phase === "ask") {
@@ -872,6 +1079,156 @@ export function choose(state: GameState, option: 0 | 1): void {
       state.active = null;
     }
   }
+}
+
+// ---------------------------------------------------------------- 階段の動き
+
+/** 階段で、足を出す。← と → を、交互に押すと、1 段ずつ上る (同じ側を続けると、つまずく)。 */
+export function climb(state: GameState, side: "left" | "right"): void {
+  const stairs = state.stairs;
+  if (state.status !== "playing" || stairs === null || !stairs.on) return;
+  if (state.stun > 0) return;
+  const event = stairs.event;
+  if (event !== null) {
+    if (event.kind === "teacher" && event.phase === "stop") {
+      // 動いてしまった: 先生に怒られる
+      event.phase = "done";
+      stairs.event = null;
+      state.tags.stairScolded += 1;
+      state.stun = STAIR_SCOLD_STUN;
+    }
+    // ほかのできごとの最中は、上れない
+    return;
+  }
+  if (stairs.last === side) {
+    // 同じ側の足を、続けて出した: つまずく
+    stairs.last = null;
+    state.stun = STAIR_STUMBLE;
+    state.tags.stumbles += 1;
+    return;
+  }
+  stairs.last = side;
+  // 息切れ中は、1 段上るのに、何度も押す
+  stairs.partial += state.exhausted ? EXHAUSTED_RATE : 1;
+  while (stairs.partial >= 1 - 1e-9) {
+    stairs.partial -= 1;
+    stairs.steps += 1;
+  }
+  stairs.partial = Math.max(0, stairs.partial);
+  stairs.lastStepAt = state.time;
+  state.stamina -= STAIR_COST * DIFFICULTIES[state.difficulty].drain;
+  if (state.stamina <= 0) {
+    state.stamina = 0;
+    if (!state.exhausted) {
+      state.exhausted = true;
+      state.tags.exhausted += 1;
+    }
+  }
+}
+
+/** 階段で押された (タップ / スペース): 降りてくる人をよける。 */
+function pressStairs(state: GameState, stairs: StairsState): void {
+  const event = stairs.event;
+  if (event !== null && event.kind === "walker" && event.phase === "warn") {
+    event.phase = "done";
+    stairs.event = null;
+    state.tags.stairDodged += 1;
+  }
+}
+
+/** 階段で選ぶ: 友達と、立ち話をするか。 */
+function chooseStairs(stairs: StairsState, option: 0 | 1): void {
+  const event = stairs.event;
+  if (event === null || event.kind !== "friend" || event.phase !== "ask") return;
+  if (option === 0) {
+    event.phase = "talk";
+    event.elapsed = 0;
+  } else {
+    event.phase = "done";
+    stairs.event = null;
+  }
+}
+
+function stepStairs(state: GameState, stairs: StairsState, dt: number): void {
+  // スタミナは、休んでいるあいだに戻る
+  state.stamina = Math.min(STAMINA_MAX, state.stamina + RECOVER * dt);
+  if (state.exhausted && state.stamina >= RECOVER_AT) state.exhausted = false;
+  if (state.stun > 0) state.stun = Math.max(0, state.stun - dt);
+
+  const event = stairs.event;
+  if (event !== null) {
+    event.elapsed += dt;
+    if (event.kind === "walker" && event.phase === "warn") {
+      if (event.elapsed >= WALKER_WINDOW) {
+        // よけられなかった: ぶつかって、転ぶ
+        event.phase = "done";
+        stairs.event = null;
+        state.tags.stairHit += 1;
+        state.stun = STUN_SECONDS;
+      }
+    } else if (event.kind === "teacher" && event.phase === "stop") {
+      if (event.elapsed >= STAIR_TEACHER_STOP) {
+        event.phase = "done";
+        stairs.event = null;
+      }
+    } else if (event.kind === "friend" && event.phase === "talk") {
+      if (event.elapsed >= STAIR_FRIEND_SECONDS) {
+        event.phase = "done";
+        stairs.event = null;
+        state.tags.stairChatted = true;
+        state.stamina = Math.min(STAMINA_MAX, state.stamina + FRIEND_STAMINA);
+        if (state.exhausted && state.stamina >= RECOVER_AT) {
+          state.exhausted = false;
+        }
+      }
+    }
+  } else if (state.stun <= 0) {
+    // その階段の、できごとの始まり
+    const planned = stairs.plan[Math.floor(stairs.steps / STAIR_STEPS)];
+    if (
+      planned !== undefined &&
+      planned.phase === "idle" &&
+      stairs.steps % STAIR_STEPS >= STAIR_EVENT_STEP
+    ) {
+      planned.phase =
+        planned.kind === "walker"
+          ? "warn"
+          : planned.kind === "teacher"
+            ? "stop"
+            : "ask";
+      planned.elapsed = 0;
+      stairs.event = planned;
+    }
+  }
+
+  if (stairs.steps >= stairs.flights * STAIR_STEPS) {
+    state.status = "arrived";
+  } else if (clockMinute(state) >= DEADLINE_MINUTE) {
+    state.status = "late";
+  }
+}
+
+/** 階段の表示用 (画面の文字に使う)。階段に入っていないときは null。 */
+export type StairsView = {
+  floor: number;
+  /** 階段に入った直後 (まだ 1 段も上っていない) */
+  intro: boolean;
+  kind: StairEvent["kind"] | null;
+  phase: string;
+  variant: number;
+};
+
+export function stairsView(state: GameState): StairsView | null {
+  const stairs = state.stairs;
+  if (state.status !== "playing" || stairs === null || !stairs.on) return null;
+  const event = stairs.event;
+  return {
+    floor: floorOf(stairs),
+    intro: stairs.steps === 0,
+    kind: event ? event.kind : null,
+    phase: event ? event.phase : "",
+    variant: event ? event.variant : 0,
+  };
 }
 
 /** いまの時刻と進み具合。画面の文字や選択肢の表示に使う。 */
@@ -1028,6 +1385,12 @@ export function stepGame(state: GameState, dt: number): void {
   if (state.status !== "playing") return;
   state.time += dt;
 
+  // 校舎の階段 (むずかしい): 教室までの道のりが終わると、上る
+  if (state.stairs !== null && state.stairs.on) {
+    stepStairs(state, state.stairs, dt);
+    return;
+  }
+
   // ジャンプ (空中にいる間の動き)
   if (state.y > 0 || state.vy > 0) {
     state.vy -= GRAVITY * dt;
@@ -1117,7 +1480,17 @@ export function stepGame(state: GameState, dt: number): void {
   }
 
   if (state.distance >= state.routeLength) {
-    state.status = "arrived";
+    if (state.stairs !== null && !state.stairs.on) {
+      // 校舎に着いた: 階段へ (教室は、6 階)
+      state.stairs.on = true;
+      state.pace = "normal";
+      state.boost = 0;
+      state.y = 0;
+      state.vy = 0;
+      state.chase = null;
+    } else {
+      state.status = "arrived";
+    }
   } else if (clockMinute(state) >= DEADLINE_MINUTE) {
     state.status = "late";
   }
@@ -1130,13 +1503,16 @@ export type Summary = {
   arrival: string;
   /** 何分余裕で着いたか (遅刻は 0) */
   margin: number;
-  /** 遅刻のとき: 教室まで、あと何 m だったか */
+  /** 遅刻のとき: 教室まで、あと何 m だったか (階段で時間切れのときは 0) */
   remaining: number;
+  /** 階段 (むずかしい) に入ったとき、いた階。入っていなければ null */
+  stairsFloor: number | null;
   notes: string[];
 };
 
 export function summarize(state: GameState): Summary {
   const arrived = state.status === "arrived";
+  const stairsOn = state.stairs?.on === true;
   // 二度寝は、時間がたっていなくても、遅刻 (9:15)
   const clock = state.slept
     ? DEADLINE_MINUTE
@@ -1161,15 +1537,22 @@ export function summarize(state: GameState): Summary {
   if (tags.bikeDodged) notes.push("自転車をよけた!");
   if (tags.bikeHit) notes.push("自転車にぶつかって転んだ");
   if (tags.greeted) notes.push("校門で先生にあいさつした");
+  if (tags.stairDodged > 0) notes.push("階段で人をよけた");
+  if (tags.stairHit > 0) notes.push("階段で人とぶつかった");
+  if (tags.stairScolded > 0) notes.push("階段で先生に怒られた");
+  if (tags.stairChatted) notes.push("階段で友達からおにぎりをもらった");
+  if (tags.stumbles > 0) notes.push(`階段でつまずいた ${tags.stumbles} 回`);
   if (tags.falls > 0) notes.push(`転んだ ${tags.falls} 回`);
   if (tags.exhausted > 0) notes.push(`息切れした ${tags.exhausted} 回`);
   return {
     outcome: arrived ? "arrived" : "late",
     arrival: clockText(clock),
     margin: arrived ? Math.max(0, Math.floor(DEADLINE_MINUTE - clock)) : 0,
-    remaining: arrived
-      ? 0
-      : Math.ceil((state.routeLength - state.distance) / PX_PER_METER),
+    remaining:
+      arrived || stairsOn
+        ? 0
+        : Math.ceil((state.routeLength - state.distance) / PX_PER_METER),
+    stairsFloor: state.stairs !== null && stairsOn ? floorOf(state.stairs) : null,
     notes,
   };
 }

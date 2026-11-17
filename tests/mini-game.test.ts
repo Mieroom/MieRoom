@@ -51,6 +51,20 @@ import {
   VENDING_SECONDS,
   applyWake,
   buildWakeSegments,
+  climb,
+  DIFFICULTY_IDS,
+  floorOf,
+  isDifficulty,
+  STAIR_EVENT_STEP,
+  STAIR_FRIEND_SECONDS,
+  STAIR_SCOLD_STUN,
+  STAIR_STEPS,
+  STAIR_STUMBLE,
+  STAIR_TEACHER_STOP,
+  stairsView,
+  TOP_FLOOR,
+  WALKER_WINDOW,
+  type Difficulty,
   WAKE_CELLS,
   type WakeZone,
   press as pressKey,
@@ -1106,7 +1120,12 @@ describe("起床チャレンジ (目覚ましのバー)", () => {
     let state: GameState | null = null;
     for (let seed = 0; seed < 200 && state === null; seed++) {
       const candidate = waking(seed);
-      if (wakeZoneAt(0.5, candidate.wake.segments).zone === "miss") {
+      // 境目の近くで止まっても、赤になるように、両どなりも赤の並びを選ぶ
+      if (
+        [0.49, 0.5, 0.51].every(
+          (pos) => wakeZoneAt(pos, candidate.wake.segments).zone === "miss",
+        )
+      ) {
         state = candidate;
       }
     }
@@ -1176,5 +1195,366 @@ describe("起床チャレンジ (目覚ましのバー)", () => {
     applyWake(state, 8 * 60 + 10);
     expect(state.weather).toBe("rain");
     expect(state.events).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------- 難易度と、校舎の階段
+
+describe("難易度 (かんたん / ふつう / むずかしい)", () => {
+  function seeded2(seed: number) {
+    let a = seed + 1;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const reds = (difficulty: Difficulty) => {
+    const segments = buildWakeSegments(seeded2(3), difficulty);
+    return segments
+      .filter((item) => item.zone === "miss")
+      .reduce((sum, item) => sum + (item.to - item.from) * WAKE_CELLS, 0);
+  };
+
+  it("3 つの難易度。階段があるのは、むずかしいだけ", () => {
+    expect(DIFFICULTY_IDS).toEqual(["easy", "normal", "hard"]);
+    expect(isDifficulty("hard")).toBe(true);
+    expect(isDifficulty("extreme")).toBe(false);
+    expect(isDifficulty(null)).toBe(false);
+    expect(createGame(seeded2(1), { difficulty: "easy" }).stairs).toBeNull();
+    expect(createGame(seeded2(1)).stairs).toBeNull();
+    expect(createGame(seeded2(1)).difficulty).toBe("normal");
+    const hard = createGame(seeded2(1), { difficulty: "hard" });
+    expect(hard.difficulty).toBe("hard");
+    expect(hard.stairs?.flights).toBe(5);
+    expect(hard.stairs?.plan).toHaveLength(5);
+    expect(hard.stairs?.on).toBe(false);
+  });
+  it("起床バーの赤 (二度寝) は、かんたん 5 マス、ふつう 7 マス、むずかしい 9 マス", () => {
+    expect(Math.round(reds("easy"))).toBe(5);
+    expect(Math.round(reds("normal"))).toBe(7);
+    expect(Math.round(reds("hard"))).toBe(9);
+    // 色のマスは、どの難易度でも、金・緑・黄緑・オレンジ・濃いオレンジがそろう
+    for (const id of DIFFICULTY_IDS) {
+      const zones = new Set(
+        buildWakeSegments(seeded2(9), id).map((item) => item.zone),
+      );
+      for (const item of WAKE_ZONES) expect(zones.has(item.zone), id).toBe(true);
+    }
+  });
+  it("バーの速さは、難しいほど速い", () => {
+    const speeds = (difficulty: Difficulty) => {
+      const list: number[] = [];
+      for (let seed = 0; seed < 200; seed++) {
+        list.push(createGame(seeded2(seed), { difficulty }).wake.speed);
+      }
+      return [Math.min(...list), Math.max(...list)];
+    };
+    const [easyMin, easyMax] = speeds("easy");
+    const [normalMin, normalMax] = speeds("normal");
+    const [hardMin, hardMax] = speeds("hard");
+    expect(easyMin).toBeGreaterThanOrEqual(0.55);
+    expect(easyMax).toBeLessThan(normalMax);
+    expect(normalMin).toBeGreaterThanOrEqual(0.7);
+    expect(hardMin).toBeGreaterThanOrEqual(0.9);
+    expect(hardMax).toBeGreaterThan(normalMax);
+  });
+  it("できごとの数: かんたん 1〜2、ふつう 1〜3、むずかしい 3〜4", () => {
+    const counts = (difficulty: Difficulty) => {
+      const found = new Set<number>();
+      for (let seed = 0; seed < 300; seed++) {
+        found.add(createGame(seeded2(seed), { difficulty }).events.length);
+      }
+      return [...found].sort();
+    };
+    expect(counts("easy")).toEqual([1, 2]);
+    expect(counts("normal")).toEqual([1, 2, 3]);
+    const hard = counts("hard");
+    expect(Math.min(...hard)).toBeGreaterThanOrEqual(3);
+    expect(Math.max(...hard)).toBe(4);
+  });
+  it("道のりと、できごとの場所は、難易度に合わせて縮む。場面の切れ目も", () => {
+    const hard = createGame(seeded2(4), { difficulty: "hard" });
+    expect(hard.routeLength).toBeLessThanOrEqual(ROUTE_LENGTH * 0.75 * 1.05 + 1);
+    expect(hard.routeLength).toBeGreaterThanOrEqual(ROUTE_LENGTH * 0.75 * 0.95 - 1);
+    const easy = createGame(seeded2(4), { difficulty: "easy" });
+    expect(easy.routeLength).toBeLessThan(ROUTE_LENGTH * 0.9 * 1.05 + 1);
+    for (let seed = 0; seed < 100; seed++) {
+      const state = createGame(seeded2(seed), { difficulty: "hard" });
+      for (const item of state.events) {
+        const slot = EVENT_SLOTS[item.kind];
+        expect(item.at).toBeGreaterThanOrEqual(slot.from * 0.75 - 1e-6);
+        expect(item.at).toBeLessThanOrEqual(slot.to * 0.75 + 1e-6);
+        // どのできごとも、道のりの中に入る
+        expect(item.at).toBeLessThan(state.routeLength);
+      }
+    }
+    expect(stageAt(11800 * 0.75 - 1, 0.75)).toBe("street");
+    expect(stageAt(11800 * 0.75, 0.75)).toBe("school");
+    expect(stageAt(1500 * 0.75, 0.75)).toBe("street");
+    // 指定しなければ、これまでと同じ
+    expect(stageAt(11800)).toBe("school");
+  });
+  it("ダッシュで減るスタミナは、かんたんは少なく、むずかしいは多い", () => {
+    const used = (difficulty: Difficulty) => {
+      const state = createGame(fixed(0), {
+        kinds: [],
+        conditions: TODAY,
+        difficulty,
+      });
+      clearObstacles(state);
+      startGame(state);
+      setPace(state, "dash");
+      run(state, 1);
+      return STAMINA_MAX - state.stamina;
+    };
+    expect(used("easy")).toBeCloseTo(STAMINA_DRAIN * 0.7, 0);
+    expect(used("normal")).toBeCloseTo(STAMINA_DRAIN, 0);
+    expect(used("hard")).toBeCloseTo(STAMINA_DRAIN * 1.3, 0);
+  });
+  it("寝坊の日のできごとの上限: むずかしいは 3 つまで (ふつうは 2 つ)", () => {
+    const hard = createGame(fixed(0), {
+      kinds: ["mother", "dog", "crossing", "teacher"],
+      conditions: TODAY,
+      difficulty: "hard",
+    });
+    expect(hard.events).toHaveLength(4);
+    applyWake(hard, 8 * 60 + 15);
+    expect(hard.events).toHaveLength(3);
+    const normal = createGame(fixed(0), {
+      kinds: ["mother", "dog", "crossing"],
+      conditions: TODAY,
+    });
+    applyWake(normal, 8 * 60 + 15);
+    expect(normal.events).toHaveLength(2);
+  });
+});
+
+describe("校舎の階段 (むずかしい)", () => {
+  function seeded3(seed: number) {
+    let a = seed + 1;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  /** 階段に入った直後のゲーム。plan で決めた階段だけ、できごとが起きる (null は、なし)。 */
+  function onStairs(
+    plan: ("walker" | "teacher" | "friend" | null)[] = [],
+  ): GameState {
+    const state = createGame(fixed(0), {
+      kinds: [],
+      conditions: TODAY,
+      difficulty: "hard",
+    });
+    clearObstacles(state);
+    startGame(state);
+    state.distance = state.routeLength - 5;
+    stepGame(state, 0.05);
+    state.stairs!.plan.forEach((item, index) => {
+      const kind = plan[index] ?? null;
+      if (kind === null) item.phase = "done";
+      else item.kind = kind;
+    });
+    return state;
+  }
+  const other = (state: GameState) =>
+    state.stairs!.last === "left" ? "right" : "left";
+  /** 左右を交互に押して、count 段上る (1 回ごとに少し時間が進む)。 */
+  function climbSteps(state: GameState, count: number, dt = 0.2) {
+    for (let k = 0; k < count; k++) {
+      climb(state, other(state));
+      stepGame(state, dt);
+    }
+  }
+
+  it("道のりが終わると、すぐには着かず、階段が始まる (時刻は、続く)", () => {
+    const state = onStairs();
+    expect(state.status).toBe("playing");
+    expect(state.stairs?.on).toBe(true);
+    expect(state.stairs?.steps).toBe(0);
+    expect(stairsView(state)).toMatchObject({
+      floor: 1,
+      intro: true,
+      kind: null,
+    });
+    const before = clockMinute(state);
+    run(state, 1);
+    expect(clockMinute(state)).toBeCloseTo(before + 1, 1);
+    expect(state.status).toBe("playing");
+  });
+  it("階段のない難易度は、道のりが終わると、そのまま着く", () => {
+    const state = createGame(fixed(0), { kinds: [], conditions: TODAY });
+    clearObstacles(state);
+    startGame(state);
+    state.distance = state.routeLength - 5;
+    stepGame(state, 0.05);
+    expect(state.status).toBe("arrived");
+    expect(stairsView(state)).toBeNull();
+    // 階段の操作は、何も起こさない
+    climb(state, "left");
+    expect(state.stun).toBe(0);
+  });
+  it("左右を交互に押すと、1 段ずつ上る。同じ側を続けると、つまずいて止まる", () => {
+    const state = onStairs();
+    climb(state, "left");
+    expect(state.stairs?.steps).toBe(1);
+    climb(state, "right");
+    expect(state.stairs?.steps).toBe(2);
+    climb(state, "right"); // 続けて同じ側
+    expect(state.stairs?.steps).toBe(2);
+    expect(state.stun).toBe(STAIR_STUMBLE);
+    expect(state.tags.stumbles).toBe(1);
+    // つまずいている間は、上れない
+    climb(state, "left");
+    expect(state.stairs?.steps).toBe(2);
+    run(state, STAIR_STUMBLE + 0.1);
+    expect(state.stun).toBe(0);
+    // 立ち直ったあとは、どちらの側からでも始められる
+    climb(state, "right");
+    expect(state.stairs?.steps).toBe(3);
+  });
+  it("12 段で 1 つ上の階。6 階まで (60 段) 上ると、着く", () => {
+    const state = onStairs();
+    expect(floorOf(state.stairs!)).toBe(1);
+    climbSteps(state, STAIR_STEPS);
+    expect(floorOf(state.stairs!)).toBe(2);
+    climbSteps(state, STAIR_STEPS * 3);
+    expect(floorOf(state.stairs!)).toBe(5);
+    expect(state.status).toBe("playing");
+    climbSteps(state, STAIR_STEPS);
+    expect(state.status).toBe("arrived");
+    expect(floorOf(state.stairs!)).toBe(TOP_FLOOR);
+    const summary = summarize(state);
+    expect(summary.outcome).toBe("arrived");
+    expect(summary.stairsFloor).toBe(TOP_FLOOR);
+    // 着いたあとは、押しても動かない
+    climb(state, "left");
+    expect(state.stairs?.steps).toBe(STAIR_STEPS * 5);
+  });
+  it("階段は、跳べない", () => {
+    const state = onStairs();
+    jump(state);
+    expect(state.vy).toBe(0);
+    press(state);
+    expect(state.y).toBe(0);
+  });
+  it("降りてくる人: タップでよける。よけられないと、ぶつかって転ぶ", () => {
+    const state = onStairs(["walker", "walker"]);
+    climbSteps(state, STAIR_EVENT_STEP);
+    expect(stairsView(state)).toMatchObject({ kind: "walker", phase: "warn" });
+    // 起きている間は、上れない
+    const steps = state.stairs!.steps;
+    climb(state, other(state));
+    expect(state.stairs?.steps).toBe(steps);
+    press(state);
+    expect(state.stairs?.event).toBeNull();
+    expect(state.tags.stairDodged).toBe(1);
+    expect(state.stun).toBe(0);
+    // 次の階段: よけない
+    climbSteps(state, STAIR_STEPS);
+    expect(state.stairs?.event?.kind).toBe("walker");
+    run(state, WALKER_WINDOW + 0.1);
+    expect(state.stairs?.event).toBeNull();
+    expect(state.tags.stairHit).toBe(1);
+    expect(state.stun).toBeGreaterThan(0);
+    expect(state.stun).toBeLessThanOrEqual(STUN_SECONDS);
+  });
+  it("先生に止められる: 動かずに待てば済む。動くと怒られて、止まる", () => {
+    const wait = onStairs(["teacher"]);
+    climbSteps(wait, STAIR_EVENT_STEP);
+    expect(stairsView(wait)).toMatchObject({ kind: "teacher", phase: "stop" });
+    run(wait, STAIR_TEACHER_STOP + 0.1);
+    expect(wait.stairs?.event).toBeNull();
+    expect(wait.tags.stairScolded).toBe(0);
+    const before = wait.stairs!.steps;
+    climb(wait, other(wait)); // また動ける
+    expect(wait.stairs!.steps).toBe(before + 1);
+
+    const move = onStairs(["teacher"]);
+    climbSteps(move, STAIR_EVENT_STEP);
+    expect(move.stairs?.event?.kind).toBe("teacher");
+    climb(move, other(move));
+    expect(move.stairs?.event).toBeNull();
+    expect(move.tags.stairScolded).toBe(1);
+    expect(move.stun).toBe(STAIR_SCOLD_STUN);
+  });
+  it("友達: 立ち話をするとスタミナが戻る。急ぐと言えば、そのまま", () => {
+    const talk = onStairs(["friend"]);
+    climbSteps(talk, STAIR_EVENT_STEP);
+    expect(stairsView(talk)).toMatchObject({ kind: "friend", phase: "ask" });
+    talk.stamina = 10;
+    choose(talk, 0);
+    expect(talk.stairs?.event?.phase).toBe("talk");
+    run(talk, STAIR_FRIEND_SECONDS + 0.1);
+    expect(talk.stairs?.event).toBeNull();
+    expect(talk.tags.stairChatted).toBe(true);
+    expect(talk.stamina).toBeGreaterThanOrEqual(10 + FRIEND_STAMINA);
+
+    const rush = onStairs(["friend"]);
+    climbSteps(rush, STAIR_EVENT_STEP);
+    choose(rush, 1);
+    expect(rush.stairs?.event).toBeNull();
+    expect(rush.tags.stairChatted).toBe(false);
+  });
+  it("階段ごとに、できごとが 1 つ。同じ種類は、続かない", () => {
+    const kinds = new Set<string>();
+    for (let seed = 0; seed < 100; seed++) {
+      const state = createGame(seeded3(seed), { difficulty: "hard" });
+      const plan = state.stairs!.plan;
+      expect(plan).toHaveLength(5);
+      for (let k = 1; k < plan.length; k++) {
+        expect(plan[k].kind).not.toBe(plan[k - 1].kind);
+      }
+      plan.forEach((item) => kinds.add(item.kind));
+    }
+    expect([...kinds].sort()).toEqual(["friend", "teacher", "walker"]);
+  });
+  it("連打しすぎると、スタミナが切れて、息切れ: 1 段上るのに、何度も押す", () => {
+    const state = onStairs();
+    // 休まずに、押し続ける
+    let guard = 0;
+    while (!state.exhausted && guard++ < 200) climb(state, other(state));
+    expect(state.exhausted).toBe(true);
+    expect(state.tags.exhausted).toBe(1);
+    const before = state.stairs!.steps;
+    // 息切れ中は、2〜3 回押して、やっと 1 段
+    for (let k = 0; k < 5; k++) climb(state, other(state));
+    expect(state.stairs!.steps - before).toBe(2);
+    // 休むと、戻る
+    run(state, 10);
+    expect(state.exhausted).toBe(false);
+    expect(state.stamina).toBeGreaterThanOrEqual(RECOVER_AT);
+  });
+  it("階段で 9:15 になったら遅刻。何階だったかが、結果に出る", () => {
+    const state = onStairs();
+    climbSteps(state, STAIR_STEPS * 2 + 3);
+    state.time = DEADLINE_MINUTE - state.startMinute - 0.01;
+    run(state, 0.1);
+    expect(state.status).toBe("late");
+    const summary = summarize(state);
+    expect(summary.outcome).toBe("late");
+    expect(summary.stairsFloor).toBe(3);
+    expect(summary.remaining).toBe(0);
+    expect(summary.arrival).toBe("9:15");
+  });
+  it("階段のできごとと、つまずきは、結果の一言に出る", () => {
+    const state = onStairs(["walker", "teacher"]);
+    climbSteps(state, STAIR_EVENT_STEP);
+    press(state);
+    climbSteps(state, STAIR_STEPS);
+    climb(state, other(state)); // 先生の前で、動いてしまう
+    run(state, 3);
+    expect(summarize(state).notes).toContain("階段で人をよけた");
+    expect(summarize(state).notes).toContain("階段で先生に怒られた");
+    expect(
+      summarize(state).notes.some((note) => note.startsWith("階段でつまずいた")),
+    ).toBe(false);
+    climb(state, "left");
+    climb(state, "left");
+    expect(summarize(state).notes).toContain("階段でつまずいた 1 回");
   });
 });
