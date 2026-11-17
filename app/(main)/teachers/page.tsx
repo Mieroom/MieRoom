@@ -12,7 +12,7 @@ export default async function TeachersPage({
 }: PageProps<"/teachers">) {
   const user = await requireUser();
   const params = await searchParams;
-  // 学生だけの隠し要素 (気づいた人だけ): 合言葉を入れると、ゲームへ移る。
+  // 学生と時間割管理者だけの隠し要素 (気づいた人だけ): 合言葉を入れると、ゲームへ移る。
   if (opensMiniGame(user.role, one(params.q))) {
     redirect("/play");
   }

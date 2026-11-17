@@ -31,17 +31,18 @@ describe("合言葉 (先生一覧の「名前で絞る」)", () => {
   });
 });
 
-describe("学生だけ", () => {
-  it("遊べるのは学生だけ。先生・時間割管理者は、遊べない", () => {
+describe("学生と時間割管理者だけ", () => {
+  it("遊べるのは学生と時間割管理者だけ。先生は、遊べない", () => {
     expect(canPlayMiniGame("student")).toBe(true);
-    for (const role of ["teacher", "admin", "", "STUDENT", "x"]) {
+    expect(canPlayMiniGame("admin")).toBe(true);
+    for (const role of ["teacher", "", "STUDENT", "ADMIN", "x"]) {
       expect(canPlayMiniGame(role), role).toBe(false);
     }
   });
-  it("入り口は、学生が合言葉を入れたときだけ開く。先生・管理者は、ふつうの絞り込み", () => {
+  it("入り口は、学生か時間割管理者が合言葉を入れたときだけ開く。先生は、ふつうの絞り込み", () => {
     expect(opensMiniGame("student", "遅刻ダッシュ")).toBe(true);
+    expect(opensMiniGame("admin", "遅刻ダッシュ")).toBe(true);
     expect(opensMiniGame("teacher", "遅刻ダッシュ")).toBe(false);
-    expect(opensMiniGame("admin", "遅刻ダッシュ")).toBe(false);
     expect(opensMiniGame("student", "田中")).toBe(false);
     expect(opensMiniGame("student", undefined)).toBe(false);
   });

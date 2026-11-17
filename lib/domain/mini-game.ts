@@ -1,10 +1,10 @@
-// ミニゲーム「遅刻ダッシュ」(学生だけの隠し要素)。サーバーも DB も使わない、画面の中だけの規則。
+// ミニゲーム「遅刻ダッシュ」(学生と時間割管理者だけの隠し要素)。サーバーも DB も使わない、画面の中だけの規則。
 // 画面 (components/screens/mini-game.tsx) は、ここの関数を呼んで描くだけ。
 
 /** 画面に出す名前。変えるときは、ここだけを直す。 */
 export const MINI_GAME_NAME = "ミニゲーム";
 
-/** 入り口の合言葉: 先生一覧の「名前で絞る」に入れると、学生だけがゲームへ移る。 */
+/** 入り口の合言葉: 先生一覧の「名前で絞る」に入れると、学生と時間割管理者だけがゲームへ移る。 */
 const PHRASES = ["遅刻ダッシュ", "ちこくだっしゅ"];
 
 function normalizePhrase(value: string): string {
@@ -17,12 +17,12 @@ export function isMiniGamePhrase(value: string | null | undefined): boolean {
   return PHRASES.some((phrase) => normalizePhrase(phrase) === given);
 }
 
-/** ゲームを遊べるのは、学生だけ (先生・時間割管理者は、入り口も、ページも使えない)。 */
+/** ゲームを遊べるのは、学生と時間割管理者だけ (先生は、入り口も、ページも使えない)。 */
 export function canPlayMiniGame(role: string): boolean {
-  return role === "student";
+  return role === "student" || role === "admin";
 }
 
-/** 先生一覧の「名前で絞る」で、ゲームへ移すか: 学生が、合言葉を入れたときだけ。 */
+/** 先生一覧の「名前で絞る」で、ゲームへ移すか: 遊べる人が、合言葉を入れたときだけ。 */
 export function opensMiniGame(
   role: string,
   query: string | undefined,
