@@ -12,8 +12,11 @@ export function MiniGameView({
   backHref,
   kinds,
   conditions,
+  ranking = "server",
 }: {
   backHref: string;
+  /** ランキング: server = 本物 (既定)、demo = 見本 (ログインなしの見本画面用) */
+  ranking?: "server" | "demo";
   /** できごとを決めて遊ぶ (開発用の見本画面だけ) */
   kinds?: EventKind[];
   /** 天気・起床時刻を決めて遊ぶ (開発用の見本画面だけ) */
@@ -27,7 +30,7 @@ export function MiniGameView({
         actions={<LinkButton href={backHref}>もどる</LinkButton>}
       />
       <Card className="p-4 sm:p-5">
-        <MiniGame kinds={kinds} conditions={conditions} />
+        <MiniGame kinds={kinds} conditions={conditions} ranking={ranking} />
       </Card>
     </div>
   );

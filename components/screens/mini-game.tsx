@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { MiniGameRanking, type FinishedRun } from "./mini-game-ranking";
+import {
+  createDemoApi,
+  serverApi,
+  type RankingApi,
+} from "./mini-game-ranking-api";
 import {
   choose,
   clockText,
@@ -325,13 +331,18 @@ function freshGame(
   });
 }
 
-/** kinds: できごとを決めて遊ぶ (開発用の見本画面だけ。本物のページでは渡さない)。 */
+/**
+ * kinds: できごとを決めて遊ぶ (開発用の見本画面だけ。本物のページでは渡さない)。
+ * ranking: server = 本物のランキング (サーバー)、demo = 見本 (メモリの中だけ。見本画面用)、off = 出さない。
+ */
 export function MiniGame({
   kinds,
   conditions,
+  ranking = "off",
 }: {
   kinds?: EventKind[];
   conditions?: Partial<Conditions>;
+  ranking?: "server" | "demo" | "off";
 } = {}) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const game = useRef<GameState>(createGame());
@@ -359,8 +370,13 @@ export function MiniGame({
   const [phase, setPhase] = useState<Phase>("ready");
   const [view, setView] = useState<EventView | null>(null);
   const [bestMargin, setBestMargin] = useState(0);
-  const [result, setResult] = useState<(Summary & { isBest: boolean }) | null>(
-    null,
+  const [result, setResult] = useState<
+    (Summary & { isBest: boolean; run: FinishedRun }) | null
+  >(null);
+  const runCount = useRef(0);
+  // ランキングの読み書き (見本画面では、メモリの中の見本)
+  const [rankingApi] = useState<RankingApi>(() =>
+    ranking === "demo" ? createDemoApi() : serverApi,
   );
 
   // 新しいゲームを作り、今日の条件を画面に出す
@@ -525,7 +541,17 @@ export function MiniGame({
           writeBest(summary.mode, difficultyRef.current, value);
           setBestMargin(value);
         }
-        setResult({ ...summary, isBest });
+        runCount.current += 1;
+        setResult({
+          ...summary,
+          isBest,
+          run: {
+            id: runCount.current,
+            mode: summary.mode,
+            difficulty: difficultyRef.current,
+            value,
+          },
+        });
         setPhase(state.status);
       }
       // できごとの表示は、変わったときだけ更新する
@@ -570,6 +596,13 @@ export function MiniGame({
     document.addEventListener("visibilitychange", onHidden);
 
     const onKey = (event: KeyboardEvent) => {
+      // ニックネームなどの入力欄に文字を入れている間は、ゲームのキーとして扱わない
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("input, textarea, select, [contenteditable]")
+      ) {
+        return;
+      }
       const state = game.current;
       if (event.code === "Space" || event.code === "ArrowUp") {
         event.preventDefault();
@@ -1032,6 +1065,16 @@ export function MiniGame({
           </div>
         )}
       </div>
+      {ranking !== "off" && (
+        <MiniGameRanking
+          api={rankingApi}
+          mode={mode}
+          difficulty={difficulty}
+          run={
+            over && result && result.outcome === "arrived" ? result.run : null
+          }
+        />
+      )}
       <p role="status" className="sr-only">
         {over && result
           ? result.outcome === "arrived"

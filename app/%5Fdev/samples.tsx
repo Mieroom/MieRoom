@@ -1016,6 +1016,7 @@ export function sampleFor(
         element: (
           <MiniGameView
             backHref={`/_dev/s05?role=${role}`}
+            ranking="demo"
             kinds={sampleKinds(one(params.events))}
             conditions={sampleConditions(
               one(params.weather),
