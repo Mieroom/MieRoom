@@ -144,6 +144,16 @@ const CHOICES: Record<string, [string, string]> = {
   friend: ["立ち話する", "急いでると言う"],
 };
 
+/** 目覚ましのバーの色と、起きられる時刻 (絵の色と同じにする)。 */
+const WAKE_LEGEND: [string, string][] = [
+  ["bg-[#ffd84a]", "8:00"],
+  ["bg-[#6fd36f]", "8:05"],
+  ["bg-[#c8e06a]", "8:10"],
+  ["bg-[#ff9f4a]", "8:15"],
+  ["bg-[#ff7a4a]", "8:20"],
+  ["bg-[#d33b3b]", "二度寝"],
+];
+
 const RECENT_KEY = "mieroom.miniGame.recent";
 const LAST_KEY = "mieroom.miniGame.last";
 
@@ -526,10 +536,23 @@ export function MiniGame({
                     目覚ましが鳴っている!
                   </p>
                   <p className="text-xs">
-                    タップ / スペースで止める(真ん中ほど早起き。端は二度寝!)
+                    タップ / スペースで止める(色のついたところで! 赤は二度寝)
                   </p>
                 </>
               )}
+            </div>
+          </div>
+        )}
+
+        {phase === "waking" && !wake?.stopped && (
+          <div className="pointer-events-none absolute inset-x-0 top-[52%] flex justify-center">
+            <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 rounded-md bg-[#1f2a44]/85 px-3 py-1 text-[11px] text-white">
+              {WAKE_LEGEND.map(([swatch, label]) => (
+                <span key={label} className="flex items-center gap-1">
+                  <span className={`inline-block h-2.5 w-3 ${swatch}`} />
+                  {label}
+                </span>
+              ))}
             </div>
           </div>
         )}

@@ -67,20 +67,26 @@ export const START_MINUTE = 8 * 60;
 export const DEADLINE_MINUTE = 9 * 60 + 15;
 
 /**
- * 起床チャレンジ: 目覚ましのバーを、タイミングよく止める。真ん中ほど早く起きられて、余裕ができる。
- * 端で止める (二度寝) と、即遅刻。バーの位置は 0〜1 で、真ん中が 0.5。
- * until は、真ん中からの距離の上限 (この距離より近ければ、そのゾーン)。
+ * 起床チャレンジ: 目覚ましのバーを、タイミングよく止める。バーは 16 のマスに分かれていて、
+ * 色の並びは、毎回ランダム (真ん中が良いとは限らない)。赤のマス (二度寝) で止めると、即遅刻。
+ * いちばん良い (金) でも、起きられるのは 8:00。
  */
 export const WAKE_ZONES = [
-  { until: 0.05, zone: "perfect", wake: 7 * 60 + 40, label: "完璧な目覚め!" },
-  { until: 0.14, zone: "good", wake: 7 * 60 + 50, label: "早起き!" },
-  { until: 0.24, zone: "normal", wake: 8 * 60, label: "ふつうの起床" },
-  { until: 0.34, zone: "late", wake: 8 * 60 + 10, label: "寝坊!" },
-  { until: 0.43, zone: "barely", wake: 8 * 60 + 20, label: "ぎりぎり起床…" },
+  { zone: "perfect", wake: 8 * 60, label: "ベストな目覚め!", cells: 1 },
+  { zone: "good", wake: 8 * 60 + 5, label: "ちょっと遅め", cells: 2 },
+  { zone: "normal", wake: 8 * 60 + 10, label: "寝坊気味…", cells: 2 },
+  { zone: "late", wake: 8 * 60 + 15, label: "寝坊!", cells: 2 },
+  { zone: "barely", wake: 8 * 60 + 20, label: "大寝坊…!", cells: 2 },
 ] as const;
+/** バーのマスの数。ゾーンのマス以外は、赤 (二度寝)。 */
+export const WAKE_CELLS = 16;
 export type WakeZone = (typeof WAKE_ZONES)[number]["zone"] | "miss";
+/** バーの区間 (0〜1)。同じゾーンが並ぶと、ひとつにまとまる。 */
+export type WakeSegment = { from: number; to: number; zone: WakeZone };
 /** 起きられる時刻の候補 (分)。 */
 export const WAKE_OPTIONS: number[] = WAKE_ZONES.map((item) => item.wake);
+/** バーの往復の速さ (1 秒に、バーの長さの何倍か)。毎回、この範囲で変わる。 */
+const WAKE_SPEED = { min: 0.7, range: 0.3 };
 /** 止めずに、この秒数がたつと、二度寝。 */
 export const WAKE_TIME_LIMIT = 8;
 /** 止めたあと、結果を見せる秒数。 */
@@ -88,21 +94,48 @@ export const WAKE_PAUSE = 1.2;
 /** 目覚ましが鳴る時刻 (画面の表示用)。 */
 export const WAKE_ALARM_MINUTE = 7 * 60 + 30;
 /** この時刻以降に起きると、寝坊の日: 雨はくもりになり、できごとは 2 つまで。 */
-const LATE_WAKE = 8 * 60 + 10;
+const LATE_WAKE = 8 * 60 + 15;
+
+/** バーの色の並び (毎回ランダム)。マスを並べ替えて、同じゾーンが続くところは、まとめる。 */
+export function buildWakeSegments(rand: () => number): WakeSegment[] {
+  const cells: WakeZone[] = [];
+  for (const item of WAKE_ZONES) {
+    for (let k = 0; k < item.cells; k++) cells.push(item.zone);
+  }
+  while (cells.length < WAKE_CELLS) cells.push("miss");
+  for (let k = cells.length - 1; k > 0; k--) {
+    const swap = Math.min(k, Math.floor(rand() * (k + 1)));
+    [cells[k], cells[swap]] = [cells[swap], cells[k]];
+  }
+  const segments: WakeSegment[] = [];
+  cells.forEach((zone, index) => {
+    const last = segments[segments.length - 1];
+    if (last && last.zone === zone) last.to = (index + 1) / WAKE_CELLS;
+    else
+      segments.push({
+        zone,
+        from: index / WAKE_CELLS,
+        to: (index + 1) / WAKE_CELLS,
+      });
+  });
+  return segments;
+}
 
 /** バーの位置 (0〜1) から、どのゾーンか。 */
-export function wakeZoneAt(pos: number): {
+export function wakeZoneAt(
+  pos: number,
+  segments: WakeSegment[],
+): {
   zone: WakeZone;
   wake: number | null;
   label: string;
 } {
-  const distance = Math.abs(pos - 0.5);
-  for (const item of WAKE_ZONES) {
-    if (distance < item.until) {
-      return { zone: item.zone, wake: item.wake, label: item.label };
-    }
-  }
-  return { zone: "miss", wake: null, label: "二度寝!!" };
+  const segment =
+    segments.find((item) => pos >= item.from && pos < item.to) ??
+    segments[segments.length - 1];
+  const found = WAKE_ZONES.find((item) => item.zone === segment.zone);
+  if (!found) return { zone: "miss", wake: null, label: "二度寝!!" };
+  return { zone: found.zone, wake: found.wake, label: found.label };
 }
 export type Weather = "sunny" | "cloudy" | "rain";
 export const WEATHER_NAMES: Record<Weather, string> = {
@@ -297,6 +330,10 @@ export type GameState = {
   wake: {
     /** バーの往復の速さ (毎回、少し違う) */
     speed: number;
+    /** バーの色の並び (毎回ランダム) */
+    segments: WakeSegment[];
+    /** 動き出すときの、バーの位置 (往復のどこから始まるか。毎回ランダム) */
+    start: number;
     elapsed: number;
     /** バーの位置 (0〜1) */
     pos: number;
@@ -498,15 +535,7 @@ export function createGame(
     stamina: STAMINA_MAX,
     exhausted: false,
     startMinute: conditions.wake,
-    wake: {
-      speed: 1.1 + rand() * 0.5,
-      elapsed: 0,
-      pos: 0,
-      stopped: false,
-      pause: 0,
-      zone: null,
-      label: "",
-    },
+    wake: wakeStart(rand),
     slept: false,
     weather: conditions.weather,
     routeLength,
@@ -531,6 +560,24 @@ export function createGame(
       bikeHit: false,
       greeted: false,
     },
+  };
+}
+
+/** 起床チャレンジの始まり: 色の並び、バーの速さ、動き出す位置を、ランダムに決める。 */
+function wakeStart(rand: () => number): GameState["wake"] {
+  const segments = buildWakeSegments(rand);
+  const speed = WAKE_SPEED.min + rand() * WAKE_SPEED.range;
+  const start = rand() * 2;
+  return {
+    speed,
+    segments,
+    start,
+    elapsed: 0,
+    pos: wakePosition(0, speed, start),
+    stopped: false,
+    pause: 0,
+    zone: null,
+    label: "",
   };
 }
 
@@ -643,14 +690,14 @@ export function pressWake(state: GameState): void {
   if (state.status !== "waking" || wake.stopped) return;
   wake.stopped = true;
   wake.pause = 0;
-  const result = wakeZoneAt(wake.pos);
+  const result = wakeZoneAt(wake.pos, wake.segments);
   wake.zone = result.zone;
   wake.label = result.label;
 }
 
-/** バーの位置: 0 → 1 → 0 と、一定の速さで往復する。 */
-function wakePosition(elapsed: number, speed: number): number {
-  const t = (elapsed * speed) % 2;
+/** バーの位置: 0 → 1 → 0 と、一定の速さで往復する。start は、動き出す位置 (0〜2)。 */
+function wakePosition(elapsed: number, speed: number, start: number): number {
+  const t = (start + elapsed * speed) % 2;
   return t < 1 ? t : 2 - t;
 }
 
@@ -658,7 +705,7 @@ function stepWake(state: GameState, dt: number): void {
   const wake = state.wake;
   if (!wake.stopped) {
     wake.elapsed += dt;
-    wake.pos = wakePosition(wake.elapsed, wake.speed);
+    wake.pos = wakePosition(wake.elapsed, wake.speed, wake.start);
     if (wake.elapsed >= WAKE_TIME_LIMIT) {
       // 止めなかった: 二度寝
       wake.stopped = true;

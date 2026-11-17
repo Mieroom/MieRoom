@@ -5,7 +5,6 @@ import {
   CROSSING_WAIT,
   DEADLINE_MINUTE,
   WAKE_ALARM_MINUTE,
-  WAKE_ZONES,
   PLAYER,
   STAGE_STARTS,
   STAMINA_MAX,
@@ -1033,21 +1032,15 @@ const ZONE_COLOR: Record<string, string> = {
 };
 const WAKE_BAR = { left: 60, width: 200, top: 46, height: 10 } as const;
 
-/** 目覚ましのバー: 真ん中ほど早起き。両端は二度寝 (赤)。白いマーカーが往復する。 */
+/** 目覚ましのバー: 色の並びは、毎回ランダム。赤は二度寝。白いマーカーが往復する。 */
 function drawWakeBar(ctx: CanvasRenderingContext2D, game: GameState) {
   const { left, width, top, height } = WAKE_BAR;
   rect(ctx, C.ink, left - 2, top - 2, width + 4, height + 4);
-  rect(ctx, ZONE_COLOR.miss, left, top, width, height);
-  // 外側のゾーンから順に、内側へ塗り重ねる
-  for (const item of [...WAKE_ZONES].reverse()) {
-    rect(
-      ctx,
-      ZONE_COLOR[item.zone],
-      left + (0.5 - item.until) * width,
-      top,
-      item.until * 2 * width,
-      height,
-    );
+  for (const segment of game.wake.segments) {
+    const x0 = left + Math.round(segment.from * width);
+    const x1 = left + Math.round(segment.to * width);
+    rect(ctx, ZONE_COLOR[segment.zone], x0, top, x1 - x0, height);
+    rect(ctx, C.ink, x0, top, 1, height); // 区切り
   }
   // マーカー (止めたら、点滅する)
   const x = left + game.wake.pos * width;

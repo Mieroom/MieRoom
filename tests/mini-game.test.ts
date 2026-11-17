@@ -50,6 +50,9 @@ import {
   TEACHER_TAPS,
   VENDING_SECONDS,
   applyWake,
+  buildWakeSegments,
+  WAKE_CELLS,
+  type WakeZone,
   press as pressKey,
   startWake,
   wakeView,
@@ -937,61 +940,136 @@ describe("今日の条件 (起きた時刻・天気・道のり・障害物)", (
 });
 
 describe("起床チャレンジ (目覚ましのバー)", () => {
-  function waking(seedSpeed = 0): GameState {
-    // 速さの乱数を決める (0 → 1.1、1 → 1.6)
-    const state = createGame(fixed(seedSpeed), { conditions: TODAY });
+  // 偏りの少ない乱数 (mulberry32)
+  function seeded(seed: number) {
+    let a = seed + 1;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function waking(seed = 1): GameState {
+    const state = createGame(seeded(seed), { conditions: TODAY });
     startWake(state);
     return state;
+  }
+  /** そのゾーンの区間の、真ん中の位置 (なければ null)。 */
+  function midOf(state: GameState, zone: WakeZone, nth = 0): number | null {
+    const found = state.wake.segments.filter((item) => item.zone === zone);
+    const segment = found[nth];
+    return segment ? (segment.from + segment.to) / 2 : null;
   }
   /** バーが、狙った位置に来るまで進めて、止める。 */
   function stopAt(state: GameState, pos: number) {
     let guard = 0;
-    while (Math.abs(state.wake.pos - pos) > 0.004 && guard++ < 5000) {
-      stepGame(state, 0.01);
+    while (Math.abs(state.wake.pos - pos) > 0.004 && guard++ < 20000) {
+      stepGame(state, 0.005);
     }
     pressKey(state);
   }
 
-  it("真ん中に近いほど、早く起きられる。ゾーンの境目は、決めた距離", () => {
-    expect(wakeZoneAt(0.5)).toMatchObject({
-      zone: "perfect",
-      wake: 7 * 60 + 40,
-    });
-    expect(wakeZoneAt(0.5 + 0.049).zone).toBe("perfect");
-    expect(wakeZoneAt(0.5 + 0.06).zone).toBe("good");
-    expect(wakeZoneAt(0.5 - 0.2).zone).toBe("normal");
-    expect(wakeZoneAt(0.5 + 0.3).zone).toBe("late");
-    expect(wakeZoneAt(0.5 - 0.4).zone).toBe("barely");
-    expect(wakeZoneAt(0.5 + 0.45)).toMatchObject({ zone: "miss", wake: null });
-    expect(wakeZoneAt(0).zone).toBe("miss");
-    expect(wakeZoneAt(1).zone).toBe("miss");
-    // 起きられる時刻は、真ん中に近いほど早い
+  it("起きられる時刻は、いちばん良くて 8:00。ゾーンが悪いほど、遅い", () => {
     const wakes = WAKE_ZONES.map((item) => item.wake);
+    expect(wakes[0]).toBe(8 * 60);
     expect([...wakes].sort((a, b) => a - b)).toEqual(wakes);
     expect(WAKE_OPTIONS).toEqual(wakes);
+    expect(WAKE_OPTIONS.every((minute) => minute >= 8 * 60)).toBe(true);
   });
-  it("始めると、バーが 0 → 1 → 0 と往復する。速さは、毎回少し違う", () => {
-    const slow = waking(0);
-    const fast = waking(0.999);
-    expect(slow.status).toBe("waking");
-    expect(slow.wake.speed).toBeGreaterThanOrEqual(1.1);
-    expect(fast.wake.speed).toBeLessThanOrEqual(1.6);
-    expect(fast.wake.speed).toBeGreaterThan(slow.wake.speed);
-    stepGame(slow, 0.3);
-    expect(slow.wake.pos).toBeGreaterThan(0.2);
-    // 往復して、戻ってくる (折り返す)
+  it("バーは 16 マス。良いマスは 9 つ、赤 (二度寝) が 7 つ。同じゾーンが並ぶと、まとまる", () => {
+    const segments = buildWakeSegments(seeded(5));
+    // 隙間なく、0〜1 をおおう
+    expect(segments[0].from).toBe(0);
+    expect(segments[segments.length - 1].to).toBe(1);
+    for (let k = 1; k < segments.length; k++) {
+      expect(segments[k].from).toBeCloseTo(segments[k - 1].to, 10);
+      expect(segments[k].zone).not.toBe(segments[k - 1].zone);
+    }
+    const cells = (zone: WakeZone) =>
+      segments
+        .filter((item) => item.zone === zone)
+        .reduce((sum, item) => sum + (item.to - item.from) * WAKE_CELLS, 0);
+    for (const item of WAKE_ZONES) {
+      expect(Math.round(cells(item.zone)), item.zone).toBe(item.cells);
+    }
+    expect(Math.round(cells("miss"))).toBe(7);
+  });
+  it("色の並びは、毎回ランダム。真ん中が良いとは限らず、赤が途中にも入る", () => {
+    const layouts = new Set<string>();
+    const middle = new Set<string>();
+    let redInside = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      const segments = buildWakeSegments(seeded(seed));
+      layouts.add(JSON.stringify(segments));
+      middle.add(wakeZoneAt(0.5, segments).zone);
+      // 端 (両側 3 マス) より内側に、赤がある
+      if (
+        segments.some(
+          (item) =>
+            item.zone === "miss" &&
+            item.from >= 3 / WAKE_CELLS &&
+            item.to <= 13 / WAKE_CELLS,
+        )
+      ) {
+        redInside += 1;
+      }
+    }
+    expect(layouts.size).toBeGreaterThan(150);
+    expect(middle.size).toBeGreaterThanOrEqual(4);
+    expect(middle.has("miss")).toBe(true);
+    expect(redInside).toBeGreaterThan(190);
+  });
+  it("位置から、そのマスのゾーンが決まる。端の位置 (0 と 1) も、決まる", () => {
+    const segments = [
+      { from: 0, to: 0.5, zone: "miss" as const },
+      { from: 0.5, to: 0.75, zone: "perfect" as const },
+      { from: 0.75, to: 1, zone: "late" as const },
+    ];
+    expect(wakeZoneAt(0, segments).zone).toBe("miss");
+    expect(wakeZoneAt(0.49, segments).zone).toBe("miss");
+    expect(wakeZoneAt(0.5, segments)).toMatchObject({
+      zone: "perfect",
+      wake: 8 * 60,
+    });
+    expect(wakeZoneAt(0.8, segments).wake).toBe(8 * 60 + 15);
+    expect(wakeZoneAt(1, segments).zone).toBe("late");
+    expect(wakeZoneAt(0.2, segments).wake).toBeNull();
+  });
+  it("始めると、バーが往復する。速さと始まりの位置は、毎回少し違う", () => {
+    const speeds = new Set<number>();
+    const starts = new Set<number>();
+    for (let seed = 0; seed < 100; seed++) {
+      const state = waking(seed);
+      expect(state.wake.speed).toBeGreaterThanOrEqual(0.7);
+      expect(state.wake.speed).toBeLessThanOrEqual(1.0);
+      expect(state.wake.pos).toBeGreaterThanOrEqual(0);
+      expect(state.wake.pos).toBeLessThanOrEqual(1);
+      speeds.add(state.wake.speed);
+      starts.add(Math.round(state.wake.pos * 20));
+    }
+    expect(speeds.size).toBeGreaterThan(50);
+    expect(starts.size).toBeGreaterThan(10);
+    // 往復して、折り返す
+    const state = waking(3);
     let max = 0;
-    let wentBack = false;
-    for (let i = 0; i < 400; i++) {
-      const before = slow.wake.pos;
-      stepGame(slow, 0.01);
-      max = Math.max(max, slow.wake.pos);
-      if (slow.wake.pos < before) wentBack = true;
-      expect(slow.wake.pos).toBeGreaterThanOrEqual(0);
-      expect(slow.wake.pos).toBeLessThanOrEqual(1);
+    let min = 1;
+    let turned = 0;
+    let direction = 0;
+    for (let i = 0; i < 700; i++) {
+      const before = state.wake.pos;
+      stepGame(state, 0.01);
+      max = Math.max(max, state.wake.pos);
+      min = Math.min(min, state.wake.pos);
+      const now = Math.sign(state.wake.pos - before);
+      if (now !== 0 && direction !== 0 && now !== direction) turned += 1;
+      if (now !== 0) direction = now;
+      expect(state.wake.pos).toBeGreaterThanOrEqual(0);
+      expect(state.wake.pos).toBeLessThanOrEqual(1);
     }
     expect(max).toBeGreaterThan(0.95);
-    expect(wentBack).toBe(true);
+    expect(min).toBeLessThan(0.05);
+    expect(turned).toBeGreaterThanOrEqual(2);
   });
   it("バーが動いている間は、走らない (時刻も進まない)", () => {
     const state = waking();
@@ -999,42 +1077,47 @@ describe("起床チャレンジ (目覚ましのバー)", () => {
     expect(state.distance).toBe(0);
     expect(state.time).toBe(0);
   });
-  it("真ん中で止めると 7:40 起床。そのまま、走り出せる", () => {
-    const state = waking();
-    stopAt(state, 0.5);
+  it("金のマスで止めると 8:00 起床 (いちばん良い)。そのまま、走り出せる", () => {
+    const state = waking(4);
+    stopAt(state, midOf(state, "perfect")!);
     expect(state.wake.zone).toBe("perfect");
-    expect(wakeView(state)).toMatchObject({ stopped: true, clock: "7:40" });
+    expect(wakeView(state)).toMatchObject({ stopped: true, clock: "8:00" });
     // 結果を見せている間は、まだ起きない
     stepGame(state, WAKE_PAUSE - 0.3);
     expect(state.status).toBe("waking");
     stepGame(state, 0.5);
     expect(state.status).toBe("playing");
-    expect(state.startMinute).toBe(7 * 60 + 40);
-    expect(clockText(clockMinute(state))).toBe("7:40");
-    expect(summarize(state).notes[0]).toBe("7:40 起床 (完璧な目覚め!)");
+    expect(state.startMinute).toBe(8 * 60);
+    expect(clockText(clockMinute(state))).toBe("8:00");
+    expect(summarize(state).notes[0]).toBe("8:00 起床 (ベストな目覚め!)");
   });
   it("ゾーンごとに、起きた時刻が決まる", () => {
-    let inner = 0;
     for (const item of WAKE_ZONES) {
-      const state = waking();
-      const pos = 0.5 + (inner + item.until) / 2; // そのゾーンの中ほど (バーの右側)
-      inner = item.until;
-      stopAt(state, pos);
+      const state = waking(9);
+      stopAt(state, midOf(state, item.zone)!);
       expect(state.wake.zone, item.zone).toBe(item.zone);
       stepGame(state, WAKE_PAUSE + 0.1);
       expect(state.status).toBe("playing");
       expect(state.startMinute).toBe(item.wake);
     }
   });
-  it("端で止めると二度寝: 即遅刻 (走らずに終わる)", () => {
-    const state = waking();
-    stopAt(state, 0.97);
-    expect(state.wake.zone).toBe("miss");
-    expect(wakeView(state)).toMatchObject({ clock: null, label: "二度寝!!" });
-    stepGame(state, WAKE_PAUSE + 0.1);
-    expect(state.status).toBe("late");
-    expect(state.slept).toBe(true);
-    const summary = summarize(state);
+  it("赤いマス (二度寝) で止めると、即遅刻。真ん中の赤でも同じ (走らずに終わる)", () => {
+    // 真ん中が赤になる並びを探す
+    let state: GameState | null = null;
+    for (let seed = 0; seed < 200 && state === null; seed++) {
+      const candidate = waking(seed);
+      if (wakeZoneAt(0.5, candidate.wake.segments).zone === "miss") {
+        state = candidate;
+      }
+    }
+    expect(state).not.toBeNull();
+    stopAt(state!, 0.5);
+    expect(state!.wake.zone).toBe("miss");
+    expect(wakeView(state!)).toMatchObject({ clock: null, label: "二度寝!!" });
+    stepGame(state!, WAKE_PAUSE + 0.1);
+    expect(state!.status).toBe("late");
+    expect(state!.slept).toBe(true);
+    const summary = summarize(state!);
     expect(summary).toMatchObject({
       outcome: "late",
       arrival: "9:15",
@@ -1055,8 +1138,8 @@ describe("起床チャレンジ (目覚ましのバー)", () => {
     expect(state.slept).toBe(true);
   });
   it("止めたあとの、もう一度のタップは、何も変えない", () => {
-    const state = waking();
-    stopAt(state, 0.5);
+    const state = waking(4);
+    stopAt(state, midOf(state, "good")!);
     const zone = state.wake.zone;
     const pos = state.wake.pos;
     pressKey(state);
@@ -1065,7 +1148,7 @@ describe("起床チャレンジ (目覚ましのバー)", () => {
     expect(state.wake.zone).toBe(zone);
     expect(state.wake.pos).toBe(pos);
   });
-  it("寝坊 (8:10 以降) の日は、雨はくもりに、水たまりはごみ箱に。できごとは 2 つまで", () => {
+  it("寝坊 (8:15 以降) の日は、雨はくもりに、水たまりはごみ箱に。できごとは 2 つまで", () => {
     const state = createGame(fixed(0.5), {
       kinds: ["mother", "dog", "crossing"],
       conditions: { ...TODAY, weather: "rain" },
@@ -1079,18 +1162,18 @@ describe("起床チャレンジ (目覚ましのバー)", () => {
       height: 6,
       hit: false,
     });
-    applyWake(state, 8 * 60 + 10);
+    applyWake(state, 8 * 60 + 15);
     expect(state.weather).toBe("cloudy");
     expect(state.events).toHaveLength(2);
     expect(state.obstacles.some((item) => item.kind === "puddle")).toBe(false);
     expect(stunSeconds(state)).toBe(STUN_SECONDS);
   });
-  it("寝坊でない日 (8:00 まで) は、雨も、できごとも、そのまま", () => {
+  it("寝坊でない日 (8:10 まで) は、雨も、できごとも、そのまま", () => {
     const state = createGame(fixed(0.5), {
       kinds: ["mother", "dog", "crossing"],
       conditions: { ...TODAY, weather: "rain" },
     });
-    applyWake(state, 8 * 60);
+    applyWake(state, 8 * 60 + 10);
     expect(state.weather).toBe("rain");
     expect(state.events).toHaveLength(3);
   });
