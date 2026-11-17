@@ -36,13 +36,13 @@ const C = {
   lockerDark: "#546f9c",
   lockerLight: "#8eabda",
   ink: "#1f2a44",
-  brand: "#4f5bd5",
-  brandLight: "#8a94ee",
-  brandDark: "#3640a8",
+  brand: "#d7263d",
+  brandLight: "#ff7b8a",
+  brandDark: "#9e1429",
   white: "#ffffff",
-  bag: "#c0273a",
-  bagLight: "#e0566a",
-  bagDark: "#7f1424",
+  bag: "#a0652f",
+  bagLight: "#c98a50",
+  bagDark: "#6b3f18",
   gold: "#f2c94c",
 } as const;
 
@@ -227,51 +227,219 @@ function drawBag(
   rect(ctx, C.ink, x + mid + 1, top - 1, 1, 1);
 }
 
-// ---------------------------------------------------------------- ピンのキャラ (13×14 の体 + 足)
+// ---------------------------------------------------------------- キャラ (13×19 の枠。体 14 行 + 足 5 行)
 
-const PIN: string[] = [
-  "...BBBBBBB...",
-  "..BLLBBBBBB..",
-  ".BLLBBBBBBBB.",
-  ".BLBBBBBBBBB.",
-  ".BBBBWWWBBBB.",
-  ".BBBBWKWBBBB.",
-  ".BBBBWWWBBBD.",
-  ".BBBBBBBBBBD.",
-  ".BBBBBBBBBDD.",
-  "..BBBBBBBBD..",
-  "..BBBBBBBDD..",
-  "...BBBBBDD...",
-  "....BBBDD....",
-  ".....BDD.....",
-];
-const PIN_COLOR: Record<string, string> = {
-  B: C.brand,
-  L: C.brandLight,
-  D: C.brandDark,
-  W: C.white,
-  K: C.ink,
+export type Character = {
+  id: string;
+  name: string;
+  /** 体の絵 (14 行)。'.' は透明。文字は palette の色 */
+  sprite: string[];
+  palette: Record<string, string>;
+  /** 枠の左から、体の絵を置く位置 */
+  offsetX: number;
+  /** 腕を付ける行 (null: 腕なし)。腕は細い線 */
+  armRow: number | null;
+  /** 左足・右足の、枠の中の位置 */
+  legs: [number, number];
+  /** 時計だけ: 針が回る */
+  clock?: boolean;
 };
 
-function drawPlayer(ctx: CanvasRenderingContext2D, game: GameState) {
+export const CHARACTERS: Character[] = [
+  {
+    id: "pin",
+    name: "ピン",
+    sprite: [
+      "...BBBBBBB...",
+      "..BLLBBBBBB..",
+      ".BLLBBBBBBBB.",
+      ".BLBBBBBBBBB.",
+      ".BBBBWWWBBBB.",
+      ".BBBBWKWBBBB.",
+      ".BBBBWWWBBBD.",
+      ".BBBBBBBBBBD.",
+      ".BBBBBBBBBDD.",
+      "..BBBBBBBBD..",
+      "..BBBBBBBDD..",
+      "...BBBBBDD...",
+      "....BBBDD....",
+      ".....BDD.....",
+    ],
+    palette: {
+      B: C.brand,
+      L: C.brandLight,
+      D: C.brandDark,
+      W: C.white,
+      K: C.ink,
+    },
+    offsetX: 0,
+    armRow: null,
+    legs: [3, 8],
+  },
+  {
+    id: "pencil",
+    name: "えんぴつ",
+    sprite: [
+      ".PPPPPPP.",
+      "PPPPPPPPP",
+      "GGGGGGGGG",
+      "ggggggggg",
+      "YYYYYYYYy",
+      "YYKYYYKYy",
+      "YYKYYYKYy",
+      "YYYYYYYYy",
+      "YYYKKKYYy",
+      "YYYYYYYYy",
+      "WWWWWWWWW",
+      ".WWWWWWW.",
+      "..WWWWW..",
+      "...KKK...",
+    ],
+    palette: {
+      P: "#f29aa8",
+      G: "#cfd3dc",
+      g: "#9aa0ae",
+      Y: "#f7c948",
+      y: "#d9a62b",
+      W: "#e8c99b",
+      K: C.ink,
+    },
+    offsetX: 2,
+    armRow: 6,
+    legs: [4, 7],
+  },
+  {
+    id: "eraser",
+    name: "消しゴム",
+    sprite: [
+      ".........",
+      ".........",
+      ".........",
+      ".WWWWWWW.",
+      "WWWWWWWWw",
+      "WWKWWWKWw",
+      "WWKWWWKWw",
+      "WWWWWWWWw",
+      "WWWKKKWWw",
+      "BBBBBBBBB",
+      "BBBBBBBBB",
+      "BBBBBBBBb",
+      "BBBBBBBBb",
+      "bbbbbbbbb",
+    ],
+    palette: {
+      W: "#f4f6fb",
+      w: "#d4d9e6",
+      K: C.ink,
+      B: "#4f7fd6",
+      b: "#3a62ad",
+    },
+    offsetX: 2,
+    armRow: 7,
+    legs: [4, 7],
+  },
+  {
+    id: "clock",
+    name: "時計",
+    sprite: [
+      ".........",
+      ".........",
+      "..RRRRR..",
+      ".RRFFFRR.",
+      "RRFFFFFRR",
+      "RFFKFKFFR",
+      "RFFKFKFFR",
+      "RFFFFFFFR",
+      "RFFFFFFFR",
+      "RFFFFFFFR",
+      "RFFKKKFFR",
+      "RRFFFFFRR",
+      ".RRFFFRR.",
+      "..RRRRR..",
+    ],
+    palette: { R: "#2f9e8f", F: "#fff7e0", K: C.ink },
+    offsetX: 2,
+    armRow: 8,
+    legs: [4, 7],
+    clock: true,
+  },
+  {
+    id: "notebook",
+    name: "ノート",
+    sprite: [
+      ".........",
+      ".........",
+      "KNNNNNNNn",
+      "GNNNNNNNn",
+      "KNLLLLLNn",
+      "GNLKLKLNn",
+      "KNLLLLLNn",
+      "GNLKKKLNn",
+      "KNNNNNNNn",
+      "GNNNNNNNn",
+      "KNNNNNNNn",
+      "GNNNNNNNn",
+      "KNNNNNNNn",
+      "Gnnnnnnnn",
+    ],
+    palette: {
+      K: C.ink,
+      G: "#cfd3dc",
+      N: "#3aa05a",
+      n: "#2a7a43",
+      L: "#fffbe8",
+    },
+    offsetX: 2,
+    armRow: 8,
+    legs: [4, 7],
+  },
+];
+
+function drawPlayer(
+  ctx: CanvasRenderingContext2D,
+  game: GameState,
+  character: Character,
+) {
   const left = Math.round(PLAYER.x / 2);
   const feet = GROUND - Math.round(game.y / 2);
   const bodyTop = feet - 19;
-  PIN.forEach((row, rowIndex) => {
+  const x0 = left + character.offsetX;
+  character.sprite.forEach((row, rowIndex) => {
     for (let col = 0; col < row.length; col++) {
-      const color = PIN_COLOR[row[col]];
-      if (color) rect(ctx, color, left + col, bodyTop + rowIndex, 1, 1);
+      const color = character.palette[row[col]];
+      if (color) rect(ctx, color, x0 + col, bodyTop + rowIndex, 1, 1);
     }
   });
-  // 足: 走っている間は交互に動く。跳んでいる間は、そろえる
   const frame = Math.floor(game.time * 10) % 2;
   const air = game.y > 0;
+  // 時計の針: 4 方向に、順に回る
+  if (character.clock) {
+    const turn = Math.floor(game.time * 8) % 4;
+    const [dx, dy] = [
+      [0, -2],
+      [2, 0],
+      [0, 2],
+      [-2, 0],
+    ][turn];
+    rect(ctx, C.ink, x0 + 4, bodyTop + 8, 1, 1);
+    rect(ctx, C.ink, x0 + 4 + dx, bodyTop + 8 + dy, 1, 1);
+  }
+  // 腕: 細い線。走る間は交互に振り、跳んでいる間は、両方を上げる
+  if (character.armRow !== null) {
+    const top = bodyTop + character.armRow;
+    const leftArm = air ? -3 : frame === 0 ? -2 : 1;
+    const rightArm = air ? -3 : frame === 0 ? 1 : -2;
+    rect(ctx, C.ink, left + 1, top + leftArm, 1, 4);
+    rect(ctx, C.ink, left + 11, top + rightArm, 1, 4);
+  }
+  // 足: 走っている間は交互に動く。跳んでいる間は、そろえる
   const a = air ? 3 : frame === 0 ? 5 : 3;
   const b = air ? 3 : frame === 0 ? 3 : 5;
-  rect(ctx, C.ink, left + 3, feet - a, 2, a);
-  rect(ctx, C.ink, left + 2, feet - 1, 3, 1);
-  rect(ctx, C.ink, left + 8, feet - b, 2, b);
-  rect(ctx, C.ink, left + 8, feet - 1, 3, 1);
+  const [legL, legR] = character.legs;
+  rect(ctx, C.ink, left + legL, feet - a, 2, a);
+  rect(ctx, C.ink, left + legL - 1, feet - 1, 3, 1);
+  rect(ctx, C.ink, left + legR, feet - b, 2, b);
+  rect(ctx, C.ink, left + legR, feet - 1, 3, 1);
   // 走る土ぼこり
   if (!air && game.status === "playing") {
     const puff = Math.floor(game.time * 18) % 3;
@@ -287,6 +455,7 @@ export function drawScene(
   game: GameState,
   score: number,
   best: number,
+  character: Character = CHARACTERS[0],
 ) {
   const floor = floorNumber(score);
   ctx.clearRect(0, 0, ART.width, ART.height);
@@ -294,7 +463,7 @@ export function drawScene(
   for (const obstacle of game.obstacles) {
     drawBag(ctx, obstacle.x, obstacle.width, obstacle.height);
   }
-  drawPlayer(ctx, game);
+  drawPlayer(ctx, game, character);
   // 上の帯: 階・距離・ベスト (点は m)
   rect(ctx, C.ceiling, 0, 0, ART.width, CEILING);
   const floorText = floor >= 7 ? "ROOF" : `${floor}F`;

@@ -11,13 +11,14 @@ import {
   stepGame,
   type GameState,
 } from "@/lib/domain/mini-game";
-import { ART, drawScene } from "./mini-game-art";
+import { ART, CHARACTERS, drawScene } from "./mini-game-art";
 
 // 学生と時間割管理者だけの隠し要素「遅刻ダッシュ」(ドット絵): 1限に間に合うよう、廊下を走って、
 // 障害物をよける。画面の中だけで動く (サーバー・DB は使わない)。音は出さない。
 // ベストは、この端末にだけ残す。
 
 const BEST_KEY = "mieroom.miniGame.best";
+const CHARACTER_KEY = "mieroom.miniGame.character";
 // 終わった直後の連打で、すぐ始まり直さないための待ち時間 (ミリ秒)
 const RESTART_LOCK_MS = 450;
 // 重いタブやバックグラウンドから戻ったとき、一気に進まないための 1 コマの上限 (秒)
@@ -42,11 +43,31 @@ function writeBest(score: number) {
   }
 }
 
+function readCharacter(): number {
+  try {
+    const id = window.localStorage.getItem(CHARACTER_KEY);
+    const index = CHARACTERS.findIndex((item) => item.id === id);
+    return index >= 0 ? index : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeCharacter(id: string) {
+  try {
+    window.localStorage.setItem(CHARACTER_KEY, id);
+  } catch {
+    // 保存できなくても、遊べる
+  }
+}
+
 export function MiniGame() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const game = useRef<GameState>(createGame());
   const best = useRef(0);
   const overAt = useRef(0);
+  const characterIndex = useRef(0);
+  const [character, setCharacter] = useState(0);
   const [phase, setPhase] = useState<Phase>("ready");
   const [result, setResult] = useState<{
     score: number;
@@ -70,11 +91,24 @@ export function MiniGame() {
     }
   }, []);
 
+  // キャラを替える (始める前と、終わったあと)。選んだキャラは、この端末に覚えておく
+  const choose = useCallback((step: number) => {
+    if (game.current.status === "playing") return;
+    const count = CHARACTERS.length;
+    const next = (characterIndex.current + step + count) % count;
+    characterIndex.current = next;
+    setCharacter(next);
+    writeCharacter(CHARACTERS[next].id);
+  }, []);
+
   useEffect(() => {
     const element = canvas.current;
     const ctx = element?.getContext("2d");
     if (!element || !ctx) return;
     best.current = readBest();
+    const saved = readCharacter();
+    characterIndex.current = saved;
+    setCharacter(saved);
 
     let frame = 0;
     let last = performance.now();
@@ -95,7 +129,13 @@ export function MiniGame() {
         setResult({ score, floor: floorLabel(score), isBest });
         setPhase("over");
       }
-      drawScene(ctx, state, score, best.current);
+      drawScene(
+        ctx,
+        state,
+        score,
+        best.current,
+        CHARACTERS[characterIndex.current],
+      );
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
@@ -113,6 +153,9 @@ export function MiniGame() {
       if (event.code === "Space" || event.code === "ArrowUp") {
         event.preventDefault();
         if (!event.repeat) press();
+      } else if (event.code === "ArrowLeft" || event.code === "ArrowRight") {
+        event.preventDefault();
+        choose(event.code === "ArrowLeft" ? -1 : 1);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -121,7 +164,7 @@ export function MiniGame() {
       document.removeEventListener("visibilitychange", onHidden);
       window.removeEventListener("keydown", onKey);
     };
-  }, [press]);
+  }, [press, choose]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -147,7 +190,9 @@ export function MiniGame() {
                   <p className="text-base font-bold tracking-widest">
                     1限に遅刻するな!
                   </p>
-                  <p className="text-xs">タップ / スペースで スタート</p>
+                  <p className="text-xs">
+                    タップ / スペースで スタート(← → でキャラを選ぶ)
+                  </p>
                 </>
               ) : (
                 <>
@@ -159,6 +204,30 @@ export function MiniGame() {
                   <p className="text-xs">もう一度: タップ / スペース</p>
                 </>
               )}
+              <div className="pointer-events-auto mt-1 flex items-center gap-3 text-sm">
+                <button
+                  type="button"
+                  aria-label="前のキャラ"
+                  onClick={() => choose(-1)}
+                  className="grid h-8 w-8 place-items-center rounded-md bg-white/15 font-bold hover:bg-white/30"
+                >
+                  ◀
+                </button>
+                <span className="min-w-[6.5em] text-center" aria-live="polite">
+                  {CHARACTERS[character].name}
+                  <span className="ml-1 text-[11px] opacity-70">
+                    {character + 1}/{CHARACTERS.length}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  aria-label="次のキャラ"
+                  onClick={() => choose(1)}
+                  className="grid h-8 w-8 place-items-center rounded-md bg-white/15 font-bold hover:bg-white/30"
+                >
+                  ▶
+                </button>
+              </div>
             </div>
           </div>
         )}
