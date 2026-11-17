@@ -22,6 +22,7 @@ import type {
   LessonView,
   TimetableDay,
 } from "@/components/screens/lesson-parts";
+import { MiniGameView } from "@/components/screens/mini-game-view";
 import { ReservationFormView } from "@/components/screens/reservation-form-view";
 import {
   MyReservationsView,
@@ -969,6 +970,12 @@ export function sampleFor(
             ]}
           />
         ),
+      };
+    case "play":
+      // 学生だけの隠し要素 (本物は /play。入り口は、先生一覧の「名前で絞る」)
+      return {
+        menuId: "s05",
+        element: <MiniGameView backHref={`/_dev/s05?role=${role}`} />,
       };
     default:
       return null;
