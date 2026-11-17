@@ -102,6 +102,16 @@ export const CROSSING_WAIT = 5.5; // 踏切で待つ秒数
 export const DASH_OPEN = 1; // 渡れる合図が出るまで (秒)
 export const DASH_CLOSE = 1.7; // 合図が消えるまで (秒)
 export const BLOCKED_SECONDS = 4; // 渡るのに失敗して、電車に阻まれる秒数
+// 新しいできごと
+export const DOG_SECONDS = 6; // 犬に追いかけられる長さ (秒)
+export const DOG_RATE = 1.4; // 犬の速さ (ふだんの何倍か)
+export const DOG_START_GAP = 170; // 犬との最初の距離 (px)
+export const VENDING_SECONDS = 2; // 自販機で、ひと息つく秒数
+export const FRIEND_SECONDS = 3; // 友達と立ち話をする秒数
+export const FRIEND_STAMINA = 40; // おにぎりで戻るスタミナ
+export const BIKE_WINDOW = 0.8; // 自転車が飛び出して、よけられる秒数
+export const TEACHER_TAPS = 8; // 校門のあいさつの連打
+export const TEACHER_MAX = 5;
 /** 助ける / 渡る の前に、止まる位置 (できごとの手前、px)。 */
 const APPROACH = 150;
 
@@ -126,7 +136,42 @@ export type GameEvent =
       at: number;
       phase: "idle" | "ask" | "wait" | "dash" | "blocked" | "done";
       elapsed: number;
+    }
+  | {
+      kind: "dog";
+      at: number;
+      phase: "idle" | "chase" | "done";
+      elapsed: number;
+      /** 犬との距離 (px)。0 になると、追いつかれる */
+      gap: number;
+    }
+  | {
+      kind: "vending";
+      at: number;
+      phase: "idle" | "ask" | "drink" | "done";
+      elapsed: number;
+    }
+  | {
+      kind: "friend";
+      at: number;
+      phase: "idle" | "ask" | "talk" | "done";
+      elapsed: number;
+    }
+  | {
+      kind: "bike";
+      at: number;
+      phase: "idle" | "warn" | "done";
+      elapsed: number;
+    }
+  | {
+      kind: "teacher";
+      at: number;
+      phase: "idle" | "greet" | "done";
+      taps: number;
+      elapsed: number;
     };
+
+export type EventKind = GameEvent["kind"];
 
 export type Obstacle = {
   /** 道のりの位置 (左端) */
@@ -164,6 +209,8 @@ export type GameState = {
   events: GameEvent[];
   /** 進行中のできごと (あるあいだは、走らない) */
   active: GameEvent | null;
+  /** 犬に追いかけられている間 (走りながら) */
+  chase: Extract<GameEvent, { kind: "dog" }> | null;
   tags: {
     scolded: number;
     helped: boolean;
@@ -173,44 +220,119 @@ export type GameState = {
     blocked: boolean;
     falls: number;
     exhausted: number;
+    bitten: boolean;
+    dogEscaped: boolean;
+    drank: boolean;
+    chatted: boolean;
+    bikeDodged: boolean;
+    bikeHit: boolean;
+    greeted: boolean;
   };
 };
 
-function makeEvent(kind: GameEvent["kind"], at: number): GameEvent {
-  if (kind === "mother")
-    return { kind, at, phase: "idle", taps: 0, elapsed: 0 };
-  if (kind === "obasan")
-    return { kind, at, phase: "idle", taps: 0, elapsed: 0, helped: false };
-  return { kind, at, phase: "idle", elapsed: 0 };
+function makeEvent(kind: EventKind, at: number): GameEvent {
+  switch (kind) {
+    case "mother":
+      return { kind, at, phase: "idle", taps: 0, elapsed: 0 };
+    case "teacher":
+      return { kind, at, phase: "idle", taps: 0, elapsed: 0 };
+    case "obasan":
+      return { kind, at, phase: "idle", taps: 0, elapsed: 0, helped: false };
+    case "dog":
+      return { kind, at, phase: "idle", elapsed: 0, gap: DOG_START_GAP };
+    default:
+      return { kind, at, phase: "idle", elapsed: 0 };
+  }
 }
 
-/** できごとが始まる位置 (道のり)。お母さんは、そこへ着いたとき。ほかは、手前で止まる。 */
+/** できごとが始まる位置 (道のり)。お母さんと犬は、そこへ着いたとき。ほかは、手前で止まる。 */
 function triggerAt(event: GameEvent): number {
-  return event.kind === "mother" ? event.at : event.at - APPROACH;
+  return event.kind === "mother" || event.kind === "dog"
+    ? event.at
+    : event.at - APPROACH;
+}
+
+/** できごとが起きうる場所 (道のり) と、選ばれやすさ。 */
+export const EVENT_SLOTS: Record<
+  EventKind,
+  { weight: number; from: number; to: number }
+> = {
+  mother: { weight: 1, from: 150, to: 500 },
+  dog: { weight: 1, from: 2000, to: 7800 },
+  obasan: { weight: 1, from: 3200, to: 6600 },
+  vending: { weight: 0.8, from: 2300, to: 9800 },
+  friend: { weight: 0.8, from: 2300, to: 10000 },
+  bike: { weight: 1, from: 2300, to: 11000 },
+  crossing: { weight: 1, from: 8000, to: 10400 },
+  teacher: { weight: 0.6, from: 11500, to: 11600 },
+};
+export const EVENT_KINDS = Object.keys(EVENT_SLOTS) as EventKind[];
+/** できごとどうしは、これだけ離す (px)。 */
+const MIN_EVENT_GAP = 1200;
+/** 前回・前々回に出たできごとが、選ばれにくくなる度合い。 */
+const RECENT_PENALTY = [0.2, 0.5];
+
+/**
+ * この回のできごとを選ぶ (1〜3 つ)。recent は、直近の回のできごと (新しい順)。
+ * 前回に出たものは出にくく (0.2 倍)、前々回のものは少し出にくく (0.5 倍) する。
+ * kinds を渡すと、その種類をそのまま使う (テスト用)。
+ */
+function pickEvents(
+  rand: () => number,
+  recent: string[][],
+  forced?: EventKind[],
+): GameEvent[] {
+  let kinds: EventKind[];
+  if (forced) {
+    kinds = forced;
+  } else {
+    const r = rand();
+    const count = r < 0.15 ? 1 : r < 0.6 ? 2 : 3;
+    const pool = EVENT_KINDS.map((kind) => {
+      let weight = EVENT_SLOTS[kind].weight;
+      RECENT_PENALTY.forEach((penalty, index) => {
+        if (recent[index]?.includes(kind)) weight *= penalty;
+      });
+      return { kind, weight };
+    });
+    kinds = [];
+    for (let n = 0; n < count && pool.length > 0; n++) {
+      const total = pool.reduce((sum, item) => sum + item.weight, 0);
+      let t = rand() * total;
+      let index = pool.findIndex((item) => {
+        t -= item.weight;
+        return t < 0;
+      });
+      if (index < 0) index = pool.length - 1;
+      kinds.push(pool[index].kind);
+      pool.splice(index, 1);
+    }
+  }
+  const events: GameEvent[] = [];
+  for (const kind of kinds) {
+    const slot = EVENT_SLOTS[kind];
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const at = slot.from + rand() * (slot.to - slot.from);
+      if (events.every((item) => Math.abs(item.at - at) >= MIN_EVENT_GAP)) {
+        events.push(makeEvent(kind, at));
+        break;
+      }
+    }
+  }
+  events.sort((a, b) => a.at - b.at);
+  return events;
 }
 
 /**
- * 新しいゲーム。できごと (最大 3 つ) と障害物は、ここで先に決める (rand は 0 以上 1 未満の数を返す関数)。
+ * 新しいゲーム。できごと (1〜3 つ) と障害物は、ここで先に決める (rand は 0 以上 1 未満の数を返す関数)。
  * 障害物どうしの間隔は、ダッシュと飴で、いちばん速いときでも、跳び越えて着地できる長さより、必ず長い。
  * できごとの前後には、障害物を置かない。家の中にも置かない。
  */
-export function createGame(rand: () => number = Math.random): GameState {
-  const events: GameEvent[] = [];
-  if (rand() < 0.75) events.push(makeEvent("mother", 150 + rand() * 350));
-  if (rand() < 0.75) events.push(makeEvent("obasan", 3200 + rand() * 3400));
-  if (rand() < 0.7) events.push(makeEvent("crossing", 8000 + rand() * 2400));
-  if (events.length === 0) {
-    const kinds = ["mother", "obasan", "crossing"] as const;
-    const kind = kinds[Math.min(2, Math.floor(rand() * 3))];
-    const at =
-      kind === "mother"
-        ? 150 + rand() * 350
-        : kind === "obasan"
-          ? 3200 + rand() * 3400
-          : 8000 + rand() * 2400;
-    events.push(makeEvent(kind, at));
-  }
-  events.sort((a, b) => a.at - b.at);
+export function createGame(
+  rand: () => number = Math.random,
+  options: { recent?: string[][]; kinds?: EventKind[] } = {},
+): GameState {
+  const events = pickEvents(rand, options.recent ?? [], options.kinds);
 
   const minGap = RUN_SPEED * DASH_RATE * BOOST_RATE * (AIR_TIME + 0.12);
   const obstacles: Obstacle[] = [];
@@ -243,6 +365,7 @@ export function createGame(rand: () => number = Math.random): GameState {
     obstacles,
     events,
     active: null,
+    chase: null,
     tags: {
       scolded: 0,
       helped: false,
@@ -252,6 +375,13 @@ export function createGame(rand: () => number = Math.random): GameState {
       blocked: false,
       falls: 0,
       exhausted: 0,
+      bitten: false,
+      dogEscaped: false,
+      drank: false,
+      chatted: false,
+      bikeDodged: false,
+      bikeHit: false,
+      greeted: false,
     },
   };
 }
@@ -317,8 +447,14 @@ export function press(state: GameState): void {
     return;
   }
   if (event.kind === "mother" && event.phase === "scold") event.taps += 1;
+  else if (event.kind === "teacher" && event.phase === "greet") event.taps += 1;
   else if (event.kind === "obasan" && event.phase === "help") event.taps += 1;
-  else if (event.kind === "crossing" && event.phase === "dash") {
+  else if (event.kind === "bike" && event.phase === "warn") {
+    // 自転車をよけた
+    event.phase = "done";
+    state.tags.bikeDodged = true;
+    state.active = null;
+  } else if (event.kind === "crossing" && event.phase === "dash") {
     if (event.elapsed >= DASH_OPEN && event.elapsed <= DASH_CLOSE) {
       event.phase = "done";
       state.tags.dashed = true;
@@ -364,6 +500,22 @@ export function choose(state: GameState, option: 0 | 1): void {
     } else {
       event.phase = "dash";
     }
+  } else if (event.kind === "vending" && event.phase === "ask") {
+    if (option === 0) {
+      event.phase = "drink";
+      event.elapsed = 0;
+    } else {
+      event.phase = "done";
+      state.active = null;
+    }
+  } else if (event.kind === "friend" && event.phase === "ask") {
+    if (option === 0) {
+      event.phase = "talk";
+      event.elapsed = 0;
+    } else {
+      event.phase = "done";
+      state.active = null;
+    }
   }
 }
 
@@ -373,13 +525,26 @@ export type EventView = {
   phase: string;
   taps: number;
   need: number;
-  /** 渡れる合図が出ているか */
+  /** 渡れる合図 / よける合図が出ているか */
   signal: boolean;
+  /** 犬との距離の残り (0〜1)。犬に追われているときだけ */
+  progress: number;
 };
 
 export function eventView(state: GameState): EventView | null {
   const event = state.active;
-  if (event === null) return null;
+  if (event === null) {
+    const dog = state.chase;
+    if (dog === null) return null;
+    return {
+      kind: "dog",
+      phase: "chase",
+      taps: 0,
+      need: 0,
+      signal: false,
+      progress: Math.max(0, Math.min(1, dog.gap / DOG_START_GAP)),
+    };
+  }
   return {
     kind: event.kind,
     phase: event.phase,
@@ -389,12 +554,16 @@ export function eventView(state: GameState): EventView | null {
         ? MOTHER_TAPS
         : event.kind === "obasan"
           ? OBASAN_TAPS
-          : 0,
+          : event.kind === "teacher"
+            ? TEACHER_TAPS
+            : 0,
     signal:
-      event.kind === "crossing" &&
-      event.phase === "dash" &&
-      event.elapsed >= DASH_OPEN &&
-      event.elapsed <= DASH_CLOSE,
+      (event.kind === "crossing" &&
+        event.phase === "dash" &&
+        event.elapsed >= DASH_OPEN &&
+        event.elapsed <= DASH_CLOSE) ||
+      (event.kind === "bike" && event.phase === "warn"),
+    progress: 0,
   };
 }
 
@@ -417,6 +586,42 @@ function stepEvent(state: GameState, event: GameEvent, dt: number): void {
         state.stamina = STAMINA_MAX;
         state.exhausted = false;
       }
+      state.active = null;
+    }
+  } else if (event.kind === "teacher" && event.phase === "greet") {
+    event.elapsed += dt;
+    if (event.taps >= TEACHER_TAPS || event.elapsed >= TEACHER_MAX) {
+      event.phase = "done";
+      state.tags.greeted = true;
+      state.active = null;
+    }
+  } else if (event.kind === "vending" && event.phase === "drink") {
+    event.elapsed += dt;
+    if (event.elapsed >= VENDING_SECONDS) {
+      event.phase = "done";
+      state.tags.drank = true;
+      state.stamina = STAMINA_MAX;
+      state.exhausted = false;
+      state.active = null;
+    }
+  } else if (event.kind === "friend" && event.phase === "talk") {
+    event.elapsed += dt;
+    if (event.elapsed >= FRIEND_SECONDS) {
+      event.phase = "done";
+      state.tags.chatted = true;
+      state.stamina = Math.min(STAMINA_MAX, state.stamina + FRIEND_STAMINA);
+      if (state.exhausted && state.stamina >= RECOVER_AT) {
+        state.exhausted = false;
+      }
+      state.active = null;
+    }
+  } else if (event.kind === "bike" && event.phase === "warn") {
+    event.elapsed += dt;
+    if (event.elapsed >= BIKE_WINDOW) {
+      // よけられなかった: 転ぶ
+      event.phase = "done";
+      state.tags.bikeHit = true;
+      state.stun = STUN_SECONDS;
       state.active = null;
     }
   } else if (event.kind === "crossing") {
@@ -444,6 +649,17 @@ function stepEvent(state: GameState, event: GameEvent, dt: number): void {
   }
 }
 
+/** 始まったときの段階 (お母さんと校門は連打、自転車は合図、ほかは選ぶ)。 */
+const START_PHASE = {
+  mother: "scold",
+  teacher: "greet",
+  bike: "warn",
+  obasan: "ask",
+  crossing: "ask",
+  vending: "ask",
+  friend: "ask",
+} as const;
+
 /** dt 秒だけ進める。時刻は、いつでも進む (できごとの最中も、転んでいる間も)。 */
 export function stepGame(state: GameState, dt: number): void {
   if (state.status !== "playing") return;
@@ -467,6 +683,8 @@ export function stepGame(state: GameState, dt: number): void {
     state.pace === "dash";
   updateStamina(state, dt, dashing);
 
+  // この 1 コマで、走った速さ (px/s)。犬との距離に使う
+  let moved = 0;
   if (state.active !== null) {
     stepEvent(state, state.active, dt);
   } else if (state.stun > 0) {
@@ -474,16 +692,29 @@ export function stepGame(state: GameState, dt: number): void {
   } else {
     const speed =
       RUN_SPEED * paceRate(state) * (state.boost > 0 ? BOOST_RATE : 1);
+    moved = speed;
     if (state.boost > 0) state.boost = Math.max(0, state.boost - dt);
     state.distance = Math.min(ROUTE_LENGTH, state.distance + speed * dt);
 
     // できごとの始まり
     for (const event of state.events) {
-      if (event.phase === "idle" && state.distance >= triggerAt(event)) {
-        event.phase = event.kind === "mother" ? "scold" : "ask";
-        state.active = event;
-        break;
+      if (event.phase !== "idle" || state.distance < triggerAt(event)) continue;
+      if (event.kind === "dog") {
+        // 犬は、走りながらの追いかけっこ (走りは止まらない)
+        event.phase = "chase";
+        event.elapsed = 0;
+        event.gap = DOG_START_GAP;
+        state.chase = event;
+        continue;
       }
+      event.phase = START_PHASE[event.kind];
+      state.active = event;
+      // ほかのできごとが始まったら、犬は、あきらめて去る
+      if (state.chase !== null) {
+        state.chase.phase = "done";
+        state.chase = null;
+      }
+      break;
     }
 
     // 障害物にぶつかる (一度だけ。転んで止まる)
@@ -502,6 +733,23 @@ export function stepGame(state: GameState, dt: number): void {
           break;
         }
       }
+    }
+  }
+
+  // 犬: 走る速さが犬より遅いと、距離が縮む。0 で追いつかれて転ぶ。時間いっぱい逃げ切れば、成功
+  const dog = state.chase;
+  if (dog !== null) {
+    dog.elapsed += dt;
+    dog.gap += (moved - RUN_SPEED * DOG_RATE) * dt;
+    if (dog.gap <= 0) {
+      dog.phase = "done";
+      state.chase = null;
+      state.stun = STUN_SECONDS;
+      state.tags.bitten = true;
+    } else if (dog.elapsed >= DOG_SECONDS) {
+      dog.phase = "done";
+      state.chase = null;
+      state.tags.dogEscaped = true;
     }
   }
 
@@ -536,6 +784,13 @@ export function summarize(state: GameState): Summary {
   if (tags.waited) notes.push("踏切で待った");
   if (tags.dashed) notes.push("踏切を駆け抜けた!");
   if (tags.blocked) notes.push("踏切で電車に阻まれた");
+  if (tags.dogEscaped) notes.push("犬から逃げ切った!");
+  if (tags.bitten) notes.push("犬に追いつかれた…");
+  if (tags.drank) notes.push("自販機でひと息ついた");
+  if (tags.chatted) notes.push("友達からおにぎりをもらった");
+  if (tags.bikeDodged) notes.push("自転車をよけた!");
+  if (tags.bikeHit) notes.push("自転車にぶつかって転んだ");
+  if (tags.greeted) notes.push("校門で先生にあいさつした");
   if (tags.falls > 0) notes.push(`転んだ ${tags.falls} 回`);
   if (tags.exhausted > 0) notes.push(`息切れした ${tags.exhausted} 回`);
   return {

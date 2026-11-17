@@ -1,6 +1,7 @@
 import {
   clockMinute,
   clockText,
+  BIKE_WINDOW,
   CROSSING_WAIT,
   DEADLINE_MINUTE,
   PLAYER,
@@ -471,6 +472,132 @@ function drawCrossing(
   }
 }
 
+const DOG = [
+  "..........EE..",
+  "..BBBBBBBBBBB.",
+  ".TBBBBBBBBBBWK",
+  "TBBBBBBBBBBBBB",
+  ".BBBBBBBBBBBB.",
+  "..BBBBBBBBBB..",
+];
+const DOG_COLOR: Record<string, string> = {
+  B: "#a06a3a",
+  T: "#a06a3a",
+  E: "#7a4a22",
+  W: "#f4e8d0",
+  K: C.ink,
+};
+
+/** 追ってくる犬 (キャラの後ろから)。走ると、足と舌が動く。 */
+function drawDog(ctx: CanvasRenderingContext2D, x: number, time: number) {
+  const top = GROUND - 9;
+  sprite(ctx, DOG, DOG_COLOR, x, top);
+  const frame = Math.floor(time * 12) % 2;
+  rect(ctx, "#7a4a22", x + 2, GROUND - 3, 2, 3 + frame);
+  rect(ctx, "#7a4a22", x + 5 - frame, GROUND - 3, 2, 3);
+  rect(ctx, "#7a4a22", x + 9, GROUND - 3, 2, 3 + (1 - frame));
+  rect(ctx, "#7a4a22", x + 11 + frame, GROUND - 3, 2, 3);
+  rect(ctx, "#e0566a", x + 12, top + 4, 2, 1 + frame); // 舌
+  rect(ctx, "#a06a3a", x - 2, top + 1 + frame, 2, 2); // しっぽ
+}
+
+function drawVending(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  glowing: boolean,
+) {
+  const top = GROUND - 30;
+  rect(ctx, "#9e2b20", x, top, 14, 30);
+  rect(ctx, "#c0392b", x + 1, top + 1, 12, 28);
+  rect(ctx, "#ffffff", x + 2, top + 2, 10, 3);
+  rect(ctx, glowing ? "#bfe6ff" : "#1f2a44", x + 2, top + 6, 10, 14);
+  const colors = ["#e0566a", "#4f9a55", "#f2c94c"];
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      rect(
+        ctx,
+        colors[(row + col) % 3],
+        x + 3 + col * 3,
+        top + 8 + row * 4,
+        2,
+        3,
+      );
+    }
+  }
+  rect(ctx, "#dddddd", x + 10, top + 22, 3, 4);
+  rect(ctx, "#111111", x + 2, top + 23, 7, 4);
+}
+
+const PERSON = [
+  "..HHHHH..",
+  ".HHHHHHH.",
+  ".HSSSSSH.",
+  ".HSKSKSH.",
+  "..SSSSS..",
+  "..UUUUU..",
+  ".UUWWWUU.",
+  "SUUWWWUUS",
+  ".UUUUUUU.",
+  ".UUUUUUU.",
+  "..PPPPP..",
+  "..PP.PP..",
+  "..PP.PP..",
+  "..KK.KK..",
+];
+
+function drawPerson(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  palette: Record<string, string>,
+  bubble: "none" | "dots" | "talk",
+  time: number,
+) {
+  sprite(ctx, PERSON, palette, x, GROUND - PERSON.length);
+  if (bubble !== "none") {
+    const y = GROUND - PERSON.length - 9;
+    rect(ctx, C.white, x + 4, y, 14, 7);
+    rect(ctx, C.white, x + 6, y + 7, 2, 2);
+    const lit = bubble === "talk" ? Math.floor(time * 4) % 3 : 1;
+    for (let k = 0; k < 3; k++) {
+      rect(ctx, k === lit ? C.ink : "#9aa5cc", x + 6 + k * 4, y + 3, 2, 2);
+    }
+  }
+}
+
+const FRIEND_COLOR: Record<string, string> = {
+  H: "#3a2a1a",
+  S: C.skin,
+  K: C.ink,
+  U: "#4a6fb5",
+  W: C.white,
+  P: "#2b3558",
+};
+const TEACHER_COLOR: Record<string, string> = {
+  H: "#8a8a92",
+  S: C.skin,
+  K: C.ink,
+  U: "#555d78",
+  W: C.white,
+  P: "#3a3f55",
+};
+
+/** 飛び出してくる自転車 (右から、キャラの前へ)。 */
+function drawBike(ctx: CanvasRenderingContext2D, x: number) {
+  for (const wx of [x, x + 11]) {
+    rect(ctx, C.ink, wx + 1, GROUND - 5, 3, 1);
+    rect(ctx, C.ink, wx, GROUND - 4, 1, 3);
+    rect(ctx, C.ink, wx + 4, GROUND - 4, 1, 3);
+    rect(ctx, C.ink, wx + 1, GROUND - 1, 3, 1);
+  }
+  rect(ctx, "#d33b3b", x + 2, GROUND - 6, 11, 1);
+  rect(ctx, "#d33b3b", x + 6, GROUND - 9, 1, 4);
+  rect(ctx, C.ink, x + 11, GROUND - 9, 3, 1);
+  rect(ctx, "#3a7bd5", x + 5, GROUND - 15, 3, 6);
+  rect(ctx, C.skin, x + 5, GROUND - 19, 4, 4);
+  rect(ctx, "#3a2a1a", x + 5, GROUND - 20, 4, 1);
+  rect(ctx, "#2b3558", x + 6, GROUND - 9, 2, 3);
+}
+
 function drawTrain(ctx: CanvasRenderingContext2D, x: number) {
   const top = GROUND - 38;
   rect(ctx, "#e8ecf6", x, top, 120, 30);
@@ -846,9 +973,40 @@ export function drawScene(
       drawMother(ctx, edge(event.at + 80), event.phase === "scold", game.time);
     } else if (event.kind === "obasan") {
       drawObasan(ctx, edge(event.at), event, game.time);
-    } else {
+    } else if (event.kind === "crossing") {
       drawCrossing(ctx, edge(event.at), event, game.time);
+    } else if (event.kind === "vending") {
+      drawVending(ctx, edge(event.at), event.phase === "drink");
+    } else if (event.kind === "friend") {
+      drawPerson(
+        ctx,
+        edge(event.at),
+        FRIEND_COLOR,
+        event.phase === "ask"
+          ? "dots"
+          : event.phase === "talk"
+            ? "talk"
+            : "none",
+        game.time,
+      );
+    } else if (event.kind === "teacher") {
+      drawPerson(
+        ctx,
+        edge(event.at + 100),
+        TEACHER_COLOR,
+        event.phase === "greet" ? "talk" : "none",
+        game.time,
+      );
+    } else if (event.kind === "bike" && event.phase === "warn") {
+      // 右から、キャラの目の前まで飛び出してくる
+      const progress = Math.min(1, event.elapsed / BIKE_WINDOW);
+      drawBike(ctx, Math.round(150 - progress * 100));
     }
+  }
+  // 追ってくる犬
+  if (game.chase) {
+    // 犬との距離が縮むほど、キャラに近づく (最初の距離でも、画面の端に見える)
+    drawDog(ctx, Math.round(36 - game.chase.gap / 6 - 14), game.time);
   }
 
   // 障害物 (おばさんの体は、おばさんの絵で描く)

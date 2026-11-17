@@ -14,6 +14,7 @@ import {
   startGame,
   stepGame,
   summarize,
+  type EventKind,
   type EventView,
   type GameState,
   type Pace,
@@ -71,6 +72,25 @@ function writeCharacter(id: string) {
 
 /** できごとの最中に、画面へ出す文。 */
 function eventText(view: EventView): { title: string; hint: string } {
+  if (view.kind === "dog") {
+    return { title: "犬が追ってくる!!", hint: "→ ダッシュで逃げろ!" };
+  }
+  if (view.kind === "vending") {
+    return view.phase === "ask"
+      ? { title: "自販機がある!", hint: "ひと息つく?(2 秒)" }
+      : { title: "ごくごく…", hint: "スタミナが戻る" };
+  }
+  if (view.kind === "friend") {
+    return view.phase === "ask"
+      ? { title: "友達に会った!", hint: "立ち話する?(3 秒)" }
+      : { title: "おしゃべり中…", hint: "おにぎりをもらう" };
+  }
+  if (view.kind === "bike") {
+    return { title: "危ない!!", hint: "タップ / スペース!" };
+  }
+  if (view.kind === "teacher") {
+    return { title: "先生が呼び止める!", hint: "連打であいさつ!" };
+  }
   if (view.kind === "mother") {
     return { title: "早く起きなさい!!", hint: "連打で言い訳しよう!" };
   }
@@ -96,9 +116,47 @@ function eventText(view: EventView): { title: string; hint: string } {
 const CHOICES: Record<string, [string, string]> = {
   obasan: ["助ける", "通り過ぎる"],
   crossing: ["待つ", "渡る"],
+  vending: ["寄る", "通り過ぎる"],
+  friend: ["立ち話する", "急いでると言う"],
 };
 
-export function MiniGame() {
+const RECENT_KEY = "mieroom.miniGame.recent";
+
+/** 直近 2 回のできごと (新しい順)。同じものが続かないように、選ぶときに使う。 */
+function readRecent(): string[][] {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(RECENT_KEY) ?? "[]");
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .slice(0, 2)
+      .map((run) =>
+        Array.isArray(run)
+          ? run.filter((kind): kind is string => typeof kind === "string")
+          : [],
+      );
+  } catch {
+    return [];
+  }
+}
+
+function rememberRun(state: GameState) {
+  try {
+    const kinds = state.events.map((event) => event.kind);
+    window.localStorage.setItem(
+      RECENT_KEY,
+      JSON.stringify([kinds, ...readRecent()].slice(0, 2)),
+    );
+  } catch {
+    // 保存できなくても、遊べる
+  }
+}
+
+function freshGame(kinds?: EventKind[]): GameState {
+  return createGame(Math.random, { recent: readRecent(), kinds });
+}
+
+/** kinds: できごとを決めて遊ぶ (開発用の見本画面だけ。本物のページでは渡さない)。 */
+export function MiniGame({ kinds }: { kinds?: EventKind[] } = {}) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const game = useRef<GameState>(createGame());
   const best = useRef(0);
@@ -135,19 +193,21 @@ export function MiniGame() {
     const state = game.current;
     if (state.status === "ready") {
       startGame(state);
+      rememberRun(state);
       setPhase("playing");
     } else if (state.status === "playing") {
       pressInGame(state);
     } else if (performance.now() - overAt.current > RESTART_LOCK_MS) {
-      game.current = createGame();
+      game.current = freshGame(kinds);
       startGame(game.current);
+      rememberRun(game.current);
       applyPace();
       setResult(null);
       setView(null);
       viewKey.current = "null";
       setPhase("playing");
     }
-  }, [applyPace]);
+  }, [applyPace, kinds]);
 
   // 選ぶ (助ける / 通り過ぎる、待つ / 渡る)
   const pick = useCallback((option: 0 | 1) => {
@@ -168,6 +228,8 @@ export function MiniGame() {
     const element = canvas.current;
     const ctx = element?.getContext("2d");
     if (!element || !ctx) return;
+    // 前回までのできごとを避けて、この回のゲームを作り直す (まだ始まっていない)
+    game.current = freshGame(kinds);
     const savedBest = readBest();
     best.current = savedBest;
     setBestMargin(savedBest);
@@ -214,7 +276,7 @@ export function MiniGame() {
     // 別のタブに移ったら、最初からにする (走りっぱなしで時間が過ぎないように)
     const onHidden = () => {
       if (document.hidden && game.current.status === "playing") {
-        game.current = createGame();
+        game.current = freshGame(kinds);
         held.current = { left: false, right: false };
         setPhase("ready");
         setView(null);
@@ -263,7 +325,7 @@ export function MiniGame() {
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [press, changeCharacter, hold, applyPace]);
+  }, [press, changeCharacter, hold, applyPace, kinds]);
 
   const over = phase === "arrived" || phase === "late";
   const message = view ? eventText(view) : null;
@@ -287,7 +349,29 @@ export function MiniGame() {
         />
 
         {/* できごと: 文と、連打の進み、選択肢 */}
-        {phase === "playing" && view && message && (
+        {phase === "playing" && view && message && view.phase === "chase" && (
+          <div className="pointer-events-none absolute inset-x-0 top-[17%] flex justify-center">
+            <div className="flex flex-col items-center gap-1 rounded-lg bg-[#a3101f]/85 px-4 py-2 text-center text-white">
+              <p className="text-sm font-bold tracking-widest">
+                {message.title}
+              </p>
+              <p className="text-[11px]">{message.hint}</p>
+              <div className="flex gap-1" aria-hidden="true">
+                {Array.from({ length: 6 }, (_, index) => (
+                  <span
+                    key={index}
+                    className={`h-2 w-3 rounded-sm ${
+                      index < Math.ceil(view.progress * 6)
+                        ? "bg-[#ffe066]"
+                        : "bg-white/25"
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        {phase === "playing" && view && message && view.phase !== "chase" && (
           <div className="pointer-events-none absolute inset-x-0 top-[17%] flex justify-center">
             <div className="flex min-w-[15rem] flex-col items-center gap-1 rounded-lg bg-[#1f2a44]/85 px-5 py-3 text-center text-white">
               <p

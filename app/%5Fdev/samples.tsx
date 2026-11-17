@@ -22,7 +22,11 @@ import type {
   LessonView,
   TimetableDay,
 } from "@/components/screens/lesson-parts";
-import { canPlayMiniGame } from "@/lib/domain/mini-game";
+import {
+  canPlayMiniGame,
+  EVENT_KINDS,
+  type EventKind,
+} from "@/lib/domain/mini-game";
 import { MiniGameView } from "@/components/screens/mini-game-view";
 import { ReservationFormView } from "@/components/screens/reservation-form-view";
 import {
@@ -364,6 +368,17 @@ const EXPORT_ISSUES: ExportIssue[] = [
 ];
 
 /** The sample of a screen: "s03", or "s21/teachers" for a tab. */
+/** ?events=dog,bike のように、できごとを決めて遊ぶ (見本画面だけ)。 */
+function sampleKinds(value: string | undefined): EventKind[] | undefined {
+  if (!value) return undefined;
+  const kinds = value
+    .split(",")
+    .filter((item): item is EventKind =>
+      (EVENT_KINDS as string[]).includes(item),
+    );
+  return kinds.length > 0 ? kinds : undefined;
+}
+
 export function sampleFor(
   path: string[],
   params: SampleParams,
@@ -977,7 +992,12 @@ export function sampleFor(
       // 学生だけの隠し要素 (本物は /play。入り口は、先生一覧の「名前で絞る」)
       return {
         menuId: "s05",
-        element: <MiniGameView backHref={`/_dev/s05?role=${role}`} />,
+        element: (
+          <MiniGameView
+            backHref={`/_dev/s05?role=${role}`}
+            kinds={sampleKinds(one(params.events))}
+          />
+        ),
       };
     default:
       return null;

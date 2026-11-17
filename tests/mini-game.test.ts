@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AIR_TIME,
+  BIKE_WINDOW,
   BLOCKED_SECONDS,
   BOOST_RATE,
   BOOST_SECONDS,
@@ -14,6 +15,12 @@ import {
   DASH_CLOSE,
   DASH_OPEN,
   DEADLINE_MINUTE,
+  DOG_SECONDS,
+  DOG_START_GAP,
+  FRIEND_STAMINA,
+  FRIEND_SECONDS,
+  EVENT_KINDS,
+  EVENT_SLOTS,
   EXHAUSTED_RATE,
   eventView,
   isMiniGamePhrase,
@@ -37,15 +44,29 @@ import {
   STUN_SECONDS,
   stepGame,
   summarize,
+  TEACHER_MAX,
+  TEACHER_TAPS,
+  VENDING_SECONDS,
+  type EventKind,
   type GameState,
 } from "@/lib/domain/mini-game";
 
-// ミニゲーム「遅刻ダッシュ」: 合言葉、時刻、できごと (お母さん・おばさん・踏切)、転ぶ、着く / 遅刻。
+// ミニゲーム「遅刻ダッシュ」: 合言葉、時刻、できごと (8 種類)、転ぶ、着く / 遅刻。
 
 const fixed = (value: number) => () => value;
-/** rand = 0 のゲーム: できごと 3 つがすべて起きる (お母さん 150、おばさん 3200、踏切 8000)。 */
-function newGame(rand: () => number = fixed(0)): GameState {
-  const state = createGame(rand);
+/** rand = 0 のゲーム: お母さん (150)、おばさん (3200)、踏切 (8000) の 3 つが起きる。 */
+function newGame(
+  rand: () => number = fixed(0),
+  kinds: EventKind[] = ["mother", "obasan", "crossing"],
+): GameState {
+  const state = createGame(rand, { kinds });
+  startGame(state);
+  return state;
+}
+/** 種類を決めて、その 1 つだけが起きるゲーム (位置は、起きうる範囲の始め)。 */
+function onlyGame(kind: EventKind): GameState {
+  const state = createGame(fixed(0), { kinds: [kind] });
+  clearObstacles(state);
   startGame(state);
   return state;
 }
@@ -56,10 +77,7 @@ function run(state: GameState, seconds: number, step = 0.05) {
 function clearObstacles(state: GameState) {
   state.obstacles = [];
 }
-function event<K extends "mother" | "obasan" | "crossing">(
-  state: GameState,
-  kind: K,
-) {
+function event<K extends EventKind>(state: GameState, kind: K) {
   const found = state.events.find((item) => item.kind === kind);
   if (!found) throw new Error(`no ${kind}`);
   return found as Extract<(typeof state.events)[number], { kind: K }>;
@@ -116,34 +134,65 @@ describe("時刻と場面", () => {
 });
 
 describe("ゲームの作り方 (できごと・障害物)", () => {
-  it("できごとは 1〜3 つ。種類は重ならない。位置は、それぞれの場面の中", () => {
-    for (let seed = 0; seed < 200; seed++) {
-      let n = seed + 1;
-      const rand = () => {
-        n = (n * 16807) % 2147483647;
-        return n / 2147483647;
-      };
-      const state = createGame(rand);
+  function seeded(seed: number) {
+    let n = seed + 1;
+    return () => {
+      n = (n * 16807) % 2147483647;
+      return n / 2147483647;
+    };
+  }
+  it("できごとは 1〜3 つ。種類は重ならない。位置は、それぞれの範囲の中で、互いに離れている", () => {
+    for (let seed = 0; seed < 300; seed++) {
+      const state = createGame(seeded(seed));
       expect(state.events.length).toBeGreaterThanOrEqual(1);
       expect(state.events.length).toBeLessThanOrEqual(3);
       expect(new Set(state.events.map((item) => item.kind)).size).toBe(
         state.events.length,
       );
       for (const item of state.events) {
-        if (item.kind === "mother") expect(item.at).toBeLessThan(1500);
-        if (item.kind === "obasan") {
-          expect(item.at).toBeGreaterThanOrEqual(3200);
-          expect(item.at).toBeLessThanOrEqual(6600);
-        }
-        if (item.kind === "crossing") {
-          expect(item.at).toBeGreaterThanOrEqual(8000);
-          expect(item.at).toBeLessThanOrEqual(10400);
-        }
+        const slot = EVENT_SLOTS[item.kind];
+        expect(item.at, `${seed}: ${item.kind}`).toBeGreaterThanOrEqual(
+          slot.from,
+        );
+        expect(item.at, `${seed}: ${item.kind}`).toBeLessThanOrEqual(slot.to);
+      }
+      for (let k = 1; k < state.events.length; k++) {
+        expect(
+          state.events[k].at - state.events[k - 1].at,
+        ).toBeGreaterThanOrEqual(1200);
       }
     }
   });
-  it("できごとが 1 つも起きない乱数でも、必ず 1 つは起きる", () => {
-    expect(createGame(fixed(0.99)).events).toHaveLength(1);
+  it("できごとは 8 種類。どれも、選ばれることがある", () => {
+    expect(EVENT_KINDS).toHaveLength(8);
+    const seen = new Set<string>();
+    for (let seed = 0; seed < 300; seed++) {
+      for (const item of createGame(seeded(seed)).events) seen.add(item.kind);
+    }
+    expect([...seen].sort()).toEqual([...EVENT_KINDS].sort());
+  });
+  it("前回に出たできごとは、出にくい (2 回続けて同じものは、少ない)", () => {
+    const count = (recent: string[][]) => {
+      let hits = 0;
+      for (let seed = 0; seed < 1500; seed++) {
+        const events = createGame(seeded(seed * 7 + 3), { recent }).events;
+        if (events.some((item) => item.kind === "obasan")) hits += 1;
+      }
+      return hits;
+    };
+    const plain = count([]);
+    const afterLast = count([["obasan"]]);
+    const afterTwo = count([[], ["obasan"]]);
+    expect(afterLast).toBeLessThan(plain * 0.5);
+    expect(afterTwo).toBeLessThan(plain);
+    expect(afterTwo).toBeGreaterThan(afterLast);
+    // 完全には止めない (種類が少なくても、選べる)
+    expect(afterLast).toBeGreaterThan(0);
+  });
+  it("種類を指定すると、その種類だけが起きる。乱数が 0 のときは、1 つだけ起きる", () => {
+    expect(createGame(fixed(0)).events).toHaveLength(1);
+    const state = createGame(fixed(0.5), { kinds: ["dog", "bike"] });
+    expect(state.events.map((item) => item.kind)).toEqual(["dog", "bike"]);
   });
   it("障害物は、家の中とできごとの前後に置かない。間隔は、跳び越えられる長さより長い", () => {
     for (let seed = 0; seed < 100; seed++) {
@@ -535,5 +584,188 @@ describe("速さの調整とスタミナ", () => {
     stepGame(state, 0.05);
     expect(state.stamina).toBe(STAMINA_MAX);
     expect(state.exhausted).toBe(false);
+  });
+});
+
+describe("できごと: 犬に追いかけられる", () => {
+  function chased() {
+    const state = onlyGame("dog");
+    state.distance = state.events[0].at;
+    stepGame(state, 0.05);
+    return state;
+  }
+  it("犬の位置に着くと、追いかけっこが始まる。走りは止まらない", () => {
+    const state = chased();
+    expect(state.chase?.kind).toBe("dog");
+    expect(state.active).toBeNull();
+    expect(eventView(state)).toMatchObject({ kind: "dog", phase: "chase" });
+    const distance = state.distance;
+    stepGame(state, 0.1);
+    expect(state.distance).toBeGreaterThan(distance);
+  });
+  it("ふつうの速さのままだと、追いつかれて転ぶ(犬は去る)", () => {
+    const state = chased();
+    run(state, DOG_SECONDS);
+    expect(state.chase).toBeNull();
+    expect(state.tags.bitten).toBe(true);
+    expect(state.tags.falls).toBe(0); // 犬に転ばされた (障害物ではない)
+    expect(summarize(state).notes).toContain("犬に追いつかれた…");
+  });
+  it("ダッシュで走り続けると、逃げ切れる", () => {
+    const state = chased();
+    setPace(state, "dash");
+    run(state, DOG_SECONDS + 0.3);
+    expect(state.chase).toBeNull();
+    expect(state.tags.dogEscaped).toBe(true);
+    expect(state.tags.bitten).toBe(false);
+  });
+  it("息切れすると、追いつかれる。距離の割合が、表示に出る", () => {
+    const state = chased();
+    state.stamina = 5;
+    setPace(state, "dash");
+    expect(eventView(state)?.progress).toBeCloseTo(1, 1);
+    run(state, 1.5);
+    expect(state.exhausted).toBe(true);
+    run(state, DOG_SECONDS);
+    expect(state.tags.bitten).toBe(true);
+    expect(DOG_START_GAP).toBeGreaterThan(0);
+  });
+  it("ほかのできごとが始まると、犬はあきらめて去る (転ばない)", () => {
+    // 犬は範囲の始め (2000)、自販機は真ん中 (6050) に置く
+    const values = [0, 0.5];
+    let call = 0;
+    const state = createGame(() => values[Math.min(call++, 1)], {
+      kinds: ["dog", "vending"],
+    });
+    clearObstacles(state);
+    startGame(state);
+    const [dog, vending] = state.events;
+    expect(dog.kind).toBe("dog");
+    state.distance = dog.at;
+    stepGame(state, 0.05);
+    expect(state.chase).not.toBeNull();
+    state.distance = vending.at - 150;
+    stepGame(state, 0.05);
+    expect(state.chase).toBeNull();
+    expect(state.tags.bitten).toBe(false);
+    expect(state.active?.kind).toBe("vending");
+  });
+});
+
+describe("できごと: 自販機", () => {
+  function atVending() {
+    const state = onlyGame("vending");
+    state.distance = state.events[0].at - 150;
+    stepGame(state, 0.05);
+    return state;
+  }
+  it("寄ると 2 秒かかって、スタミナが全回復し、息切れも治る", () => {
+    const state = atVending();
+    state.stamina = 0;
+    state.exhausted = true;
+    expect(eventView(state)).toMatchObject({ kind: "vending", phase: "ask" });
+    choose(state, 0);
+    run(state, VENDING_SECONDS - 0.3);
+    expect(state.active).not.toBeNull();
+    run(state, 0.5);
+    expect(state.active).toBeNull();
+    expect(state.stamina).toBe(STAMINA_MAX);
+    expect(state.exhausted).toBe(false);
+    expect(state.tags.drank).toBe(true);
+  });
+  it("通り過ぎると、何も起きない", () => {
+    const state = atVending();
+    state.stamina = 10;
+    choose(state, 1);
+    expect(state.active).toBeNull();
+    expect(state.tags.drank).toBe(false);
+  });
+});
+
+describe("できごと: 友達に話しかけられる", () => {
+  function atFriend() {
+    const state = onlyGame("friend");
+    state.distance = state.events[0].at - 150;
+    stepGame(state, 0.05);
+    return state;
+  }
+  it("立ち話をすると 3 秒かかって、おにぎりでスタミナが戻る", () => {
+    const state = atFriend();
+    state.stamina = 10;
+    choose(state, 0);
+    run(state, FRIEND_SECONDS + 0.2);
+    expect(state.active).toBeNull();
+    // 立ち話の間にも、少し戻る (ふつうの回復)
+    expect(state.stamina).toBeGreaterThanOrEqual(10 + FRIEND_STAMINA);
+    expect(state.stamina).toBeLessThan(10 + FRIEND_STAMINA + 40);
+    expect(state.tags.chatted).toBe(true);
+  });
+  it("急いでいると言うと、すぐ走り出せる", () => {
+    const state = atFriend();
+    choose(state, 1);
+    expect(state.active).toBeNull();
+    expect(state.tags.chatted).toBe(false);
+  });
+  it("息切れ中に、おにぎりで 30 以上に戻れば、息切れが治る", () => {
+    const state = atFriend();
+    state.stamina = 0;
+    state.exhausted = true;
+    choose(state, 0);
+    run(state, FRIEND_SECONDS + 0.2);
+    expect(state.exhausted).toBe(false);
+  });
+});
+
+describe("できごと: 自転車の飛び出し", () => {
+  function atBike() {
+    const state = onlyGame("bike");
+    state.distance = state.events[0].at - 150;
+    stepGame(state, 0.05);
+    return state;
+  }
+  it("止まって、すぐ合図が出る。タップすると、よけられる", () => {
+    const state = atBike();
+    expect(eventView(state)).toMatchObject({ kind: "bike", signal: true });
+    press(state);
+    expect(state.active).toBeNull();
+    expect(state.tags.bikeDodged).toBe(true);
+    expect(state.stun).toBe(0);
+  });
+  it("0.8 秒のあいだにタップしないと、転ぶ", () => {
+    const state = atBike();
+    run(state, BIKE_WINDOW + 0.2);
+    expect(state.active).toBeNull();
+    expect(state.tags.bikeHit).toBe(true);
+    expect(state.stun).toBeGreaterThan(0);
+    expect(summarize(state).notes).toContain("自転車にぶつかって転んだ");
+  });
+});
+
+describe("できごと: 校門で先生に呼び止められる", () => {
+  function atTeacher() {
+    const state = onlyGame("teacher");
+    state.distance = state.events[0].at - 150;
+    stepGame(state, 0.05);
+    return state;
+  }
+  it("あいさつを 8 回連打すると、抜けられる。しなくても 5 秒で終わる", () => {
+    const fast = atTeacher();
+    expect(eventView(fast)).toMatchObject({
+      kind: "teacher",
+      need: TEACHER_TAPS,
+    });
+    for (let i = 0; i < TEACHER_TAPS; i++) press(fast);
+    stepGame(fast, 0.05);
+    expect(fast.active).toBeNull();
+    expect(fast.tags.greeted).toBe(true);
+
+    const slow = atTeacher();
+    run(slow, TEACHER_MAX + 0.3);
+    expect(slow.active).toBeNull();
+  });
+  it("教室の手前 (校門の前) で起きる", () => {
+    const state = createGame(fixed(0.5), { kinds: ["teacher"] });
+    expect(state.events[0].at).toBeGreaterThan(11000);
+    expect(state.events[0].at).toBeLessThan(11800);
   });
 });
