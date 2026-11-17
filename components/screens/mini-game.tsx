@@ -491,8 +491,14 @@ export function MiniGame({
         } else if (state.status !== "playing") {
           if (!event.repeat) changeCharacter(side === "left" ? -1 : 1);
         } else if (state.stairs?.on === true) {
-          // 階段: 左右を、交互に
-          if (!event.repeat) climb(state, side);
+          // 階段: 左右を、交互に。友達に選ぶ場面だけは、← → で選ぶ
+          if (!event.repeat) {
+            const asking =
+              state.stairs.event?.kind === "friend" &&
+              state.stairs.event.phase === "ask";
+            if (asking) choose(state, side === "left" ? 0 : 1);
+            else climb(state, side);
+          }
         } else if (state.active !== null) {
           // できごとの最中は、選ぶ (走らない)
           if (!event.repeat) choose(state, side === "left" ? 0 : 1);
