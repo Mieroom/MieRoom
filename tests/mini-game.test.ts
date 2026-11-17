@@ -61,6 +61,8 @@ import {
   DIFFICULTY_IDS,
   floorOf,
   isDifficulty,
+  STAIR_ACTOR_AHEAD,
+  stairActorStep,
   STAIR_EVENT_STEP,
   STAIR_FRIEND_SECONDS,
   STAIR_SCOLD_STUN,
@@ -1761,5 +1763,24 @@ describe("点数 (通常モード)", () => {
     expect(summary.score).toBe(0);
     expect(summary.grade).toBeNull();
     expect(summary.breakdown).toEqual([]);
+  });
+});
+
+describe("階段の人は、突然は現れない", () => {
+  it("人が立つ段は、決まっている: 先生と友達はできごとの 3 段先、降りてくる人は、階段の上の踊り場", () => {
+    for (let flight = 0; flight < 5; flight++) {
+      const start = flight * STAIR_STEPS;
+      expect(stairActorStep(flight, "teacher")).toBe(
+        start + STAIR_EVENT_STEP + STAIR_ACTOR_AHEAD,
+      );
+      expect(stairActorStep(flight, "friend")).toBe(
+        stairActorStep(flight, "teacher"),
+      );
+      expect(stairActorStep(flight, "walker")).toBe(start + STAIR_STEPS);
+      // できごとが始まる段より、先にいる (上る前から、見えている)
+      expect(stairActorStep(flight, "teacher")).toBeGreaterThan(
+        start + STAIR_EVENT_STEP,
+      );
+    }
   });
 });

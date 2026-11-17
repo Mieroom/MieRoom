@@ -6,6 +6,7 @@ import {
   DEADLINE_MINUTE,
   DIFFICULTIES,
   floorOf,
+  stairActorStep,
   STAIR_STEPS,
   STAIR_TEACHER_STOP,
   TOP_FLOOR,
@@ -1179,44 +1180,83 @@ function drawStairs(ctx: CanvasRenderingContext2D, game: GameState) {
   if (doorX < ART.width) drawDoor(ctx, doorX, 201, topOf(total) - 40);
 }
 
-/** 階段のできごとの絵: 降りてくる人、止める先生、友達。 */
-function drawStairEvent(ctx: CanvasRenderingContext2D, game: GameState) {
+/**
+ * 階段の人の絵: 降りてくる人、止める先生、友達。突然は現れない: どの階段の人も、上る前から階段に立っていて、
+ * 近づくと見える (先生と友達は、できごとが始まる 3 段先。降りてくる人は、階段の上の踊り場で待っている)。
+ */
+function drawStairActors(ctx: CanvasRenderingContext2D, game: GameState) {
   const stairs = game.stairs;
-  if (stairs === null || stairs.event === null) return;
-  const event = stairs.event;
-  // キャラの前の、坂の上に立たせる (k は、キャラからの段の数)
+  if (stairs === null) return;
+  const p = stairProgress(game);
+  // 段の数 n の所に、人を立たせる (k は、キャラからの段の数)。見える範囲の外は、描かない
   const person = (
-    k: number,
+    n: number,
     palette: Record<string, string>,
     bubble: "none" | "dots" | "talk",
+    alert: boolean,
   ) => {
+    const k = n - p;
+    if (k < -2 || k > 36) return;
+    const x = Math.round(STAIR.x + k * STAIR.run - 3);
+    const y = -Math.round(k * STAIR.rise);
     ctx.save();
-    ctx.translate(
-      Math.round(STAIR.x + k * STAIR.run - 3),
-      -Math.round(k * STAIR.rise),
-    );
+    ctx.translate(x, y);
     drawPerson(ctx, 0, palette, bubble, game.time);
     ctx.restore();
+    // 近づいたら、頭の上に「!」 (まだ何も起きていない合図)
+    if (alert && k < 10) drawAlert(ctx, x + 3, GROUND - 24 + y, game.time);
   };
-  if (event.kind === "walker" && event.phase === "warn") {
-    // 上から、おりてくる
-    const progress = Math.min(1, event.elapsed / WALKER_WINDOW);
-    person(10 - progress * 8, friendColor(event.variant), "none");
-    rect(ctx, C.alert, 56, 30, 2, 6);
-    rect(ctx, C.alert, 56, 38, 2, 2);
-  } else if (event.kind === "teacher" && event.phase === "stop") {
-    person(3, teacherColor(event.variant), "talk");
-    // 止まっていなければいけない残り時間
-    const left = Math.max(0, 1 - event.elapsed / STAIR_TEACHER_STOP);
-    rect(ctx, C.ink, 30, 22, 28, 4);
-    rect(ctx, C.alert, 31, 23, Math.round(26 * left), 2);
-  } else if (event.kind === "friend") {
-    person(
-      3,
-      friendColor(event.variant),
-      event.phase === "talk" ? "talk" : "dots",
-    );
-  }
+  stairs.plan.forEach((event, flight) => {
+    const n = stairActorStep(flight, event.kind);
+    // 終わった人は、キャラが着くまでは、その場に立っている
+    const gone = event.phase === "done" && n - p < 1.5;
+    if (event.kind === "walker") {
+      if (event.phase === "idle") {
+        person(n, friendColor(event.variant), "none", true);
+      } else if (event.phase === "warn") {
+        // 上の踊り場から、おりてくる
+        const progress = Math.min(1, event.elapsed / WALKER_WINDOW);
+        person(n - progress * 4.5, friendColor(event.variant), "none", false);
+      }
+    } else if (event.kind === "teacher") {
+      if (gone) return;
+      person(
+        n,
+        teacherColor(event.variant),
+        event.phase === "stop" ? "talk" : "none",
+        false,
+      );
+      if (event.phase === "stop") {
+        // 止まっていなければいけない残り時間
+        const left = Math.max(0, 1 - event.elapsed / STAIR_TEACHER_STOP);
+        rect(ctx, C.ink, 30, 22, 28, 4);
+        rect(ctx, C.alert, 31, 23, Math.round(26 * left), 2);
+      }
+    } else if (!gone) {
+      person(
+        n,
+        friendColor(event.variant),
+        event.phase === "talk"
+          ? "talk"
+          : event.phase === "ask"
+            ? "dots"
+            : "none",
+        false,
+      );
+    }
+  });
+}
+
+/** 頭の上の「!」 (点滅する)。これから、何かが起きる合図。 */
+function drawAlert(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  time: number,
+) {
+  if (Math.floor(time * 5) % 2 === 0) return;
+  rect(ctx, C.alert, x, y, 2, 6);
+  rect(ctx, C.alert, x, y + 7, 2, 2);
 }
 
 /** 場面の区間 [from, to) だけに、描く範囲を絞る (境目は、ドアと校門が隠す)。 */
@@ -1317,7 +1357,7 @@ export function drawScene(
   // 校舎の階段 (むずかしい): 教室までの道のりが終わると、この絵になる
   if (game.stairs !== null && game.stairs.on) {
     drawStairs(ctx, game);
-    drawStairEvent(ctx, game);
+    drawStairActors(ctx, game);
     drawPlayer(ctx, game, character);
     drawHud(ctx, game);
     return;
@@ -1384,18 +1424,38 @@ export function drawScene(
         event.phase === "greet" ? "talk" : "none",
         game.time,
       );
+    } else if (event.kind === "bike" && event.phase === "idle") {
+      // 道の先の脇道で、待っている (近づくと、「!」が出る)
+      const x = edge(event.at);
+      if (x < ART.width + 4) {
+        drawBike(ctx, x, event.variant);
+        if (x < 200) drawAlert(ctx, x + 5, GROUND - 28, game.time);
+      }
     } else if (event.kind === "bike" && event.phase === "warn") {
-      // 右から、キャラの目の前まで飛び出してくる
+      // 待っていた所から、キャラの目の前まで飛び出してくる
       const progress = Math.min(1, event.elapsed / BIKE_WINDOW);
-      drawBike(ctx, Math.round(150 - progress * 100), event.variant);
+      const start = edge(event.at);
+      drawBike(ctx, Math.round(start - progress * (start - 50)), event.variant);
+    } else if (event.kind === "dog" && event.phase === "idle") {
+      // 道の先に、犬がいる (こちらを向いている。近づくと、「!」が出る)
+      const x = edge(event.at);
+      if (x > -20 && x < ART.width + 4) {
+        ctx.save();
+        ctx.translate(x + 14, 0);
+        ctx.scale(-1, 1);
+        drawDog(ctx, 0, game.time / 4, event.variant);
+        ctx.restore();
+        if (x < 200) drawAlert(ctx, x + 5, GROUND - 22, game.time);
+      }
     }
   }
   // 追ってくる犬
   if (game.chase && !waking) {
-    // 犬との距離が縮むほど、キャラに近づく (最初の距離でも、画面の端に見える)
+    // 犬との距離が縮むほど、キャラに近づく (最初の距離でも、画面の端に見える)。
+    // 立っていた場所から走り出す: 最初は、その場所に見え、そこから後ろへ流れて、追いかける位置につく
     drawDog(
       ctx,
-      Math.round(36 - game.chase.gap / 6 - 14),
+      Math.max(edge(game.chase.at), Math.round(36 - game.chase.gap / 6 - 14)),
       game.time,
       game.chase.variant,
     );

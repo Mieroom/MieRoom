@@ -312,6 +312,19 @@ export const STAIR_STEPS = 12;
 export const TOP_FLOOR = 6;
 /** 階段の途中 (この段まで上ると) で、その階段のできごとが起きる。 */
 export const STAIR_EVENT_STEP = 6;
+/** 階段の先生と友達は、できごとが始まる段の、これだけ先に立っている (最初から見えている)。 */
+export const STAIR_ACTOR_AHEAD = 3;
+
+/** 階段のできごとの人が立つ段 (全体の段の数): 上る前から、そこに立っている。降りてくる人は、階段の上の踊り場。 */
+export function stairActorStep(
+  flight: number,
+  kind: StairEvent["kind"],
+): number {
+  return kind === "walker"
+    ? (flight + 1) * STAIR_STEPS
+    : flight * STAIR_STEPS + STAIR_EVENT_STEP + STAIR_ACTOR_AHEAD;
+}
+
 /** 1 段上るたびに減る、スタミナ。 */
 export const STAIR_COST = 2.2;
 /** 同じ側を続けて押す (つまずく) と、止まる秒数。 */
