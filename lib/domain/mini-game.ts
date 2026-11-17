@@ -77,9 +77,14 @@ export function scoreOf(state: GameState): number {
   return Math.floor(state.distance / PX_PER_METER);
 }
 
+/** いまの階の番号: 1〜6、そのあとは 7 (屋上)。 */
+export function floorNumber(score: number): number {
+  return Math.min(7, 1 + Math.floor(score / METERS_PER_FLOOR));
+}
+
 /** いまの階の名前: 1階〜6階、そのあとは屋上。 */
 export function floorLabel(score: number): string {
-  const floor = 1 + Math.floor(score / METERS_PER_FLOOR);
+  const floor = floorNumber(score);
   return floor >= 7 ? "屋上" : `${floor}階`;
 }
 

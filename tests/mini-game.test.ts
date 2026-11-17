@@ -3,6 +3,7 @@ import {
   canPlayMiniGame,
   createGame,
   floorLabel,
+  floorNumber,
   isMiniGamePhrase,
   jump,
   opensMiniGame,
@@ -69,6 +70,12 @@ describe("進み方", () => {
     expect(floorLabel(599)).toBe("6階");
     expect(floorLabel(600)).toBe("屋上");
     expect(floorLabel(5000)).toBe("屋上");
+  });
+  it("階の番号は、1 から 7 (屋上) まで", () => {
+    expect(floorNumber(0)).toBe(1);
+    expect(floorNumber(599)).toBe(6);
+    expect(floorNumber(600)).toBe(7);
+    expect(floorNumber(999999)).toBe(7);
   });
 });
 
