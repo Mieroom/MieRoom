@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { TeachersView } from "@/components/screens/teachers-view";
-import { opensMiniGame } from "@/lib/domain/mini-game";
+import { canPlayMiniGame, opensMiniGame } from "@/lib/domain/mini-game";
 import { fiscalYearOfDate, schoolToday } from "@/lib/domain/school-date";
 import { loadTeacherDirectory } from "@/lib/server/queries/common";
 import { requireUser } from "@/lib/server/session";
@@ -21,5 +21,11 @@ export default async function TeachersPage({
     fiscalYearOfDate(schoolToday(new Date())),
     query,
   );
-  return <TeachersView teachers={teachers} query={query} />;
+  return (
+    <TeachersView
+      teachers={teachers}
+      query={query}
+      miniGame={canPlayMiniGame(user.role)}
+    />
+  );
 }

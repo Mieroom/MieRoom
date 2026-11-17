@@ -22,6 +22,7 @@ import type {
   LessonView,
   TimetableDay,
 } from "@/components/screens/lesson-parts";
+import { canPlayMiniGame } from "@/lib/domain/mini-game";
 import { MiniGameView } from "@/components/screens/mini-game-view";
 import { ReservationFormView } from "@/components/screens/reservation-form-view";
 import {
@@ -559,6 +560,7 @@ export function sampleFor(
             teachers={rows.filter((row) => row.name.includes(query))}
             query={query}
             basePath={base}
+            miniGame={canPlayMiniGame(role)}
           />
         ),
       };
