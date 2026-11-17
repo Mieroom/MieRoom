@@ -25,6 +25,8 @@ import type {
 import {
   canPlayMiniGame,
   EVENT_KINDS,
+  WAKE_OPTIONS,
+  type Conditions,
   type EventKind,
 } from "@/lib/domain/mini-game";
 import { MiniGameView } from "@/components/screens/mini-game-view";
@@ -377,6 +379,20 @@ function sampleKinds(value: string | undefined): EventKind[] | undefined {
       (EVENT_KINDS as string[]).includes(item),
     );
   return kinds.length > 0 ? kinds : undefined;
+}
+
+/** ?weather=rain&wake=490 のように、天気と起床時刻 (分) を決めて遊ぶ (見本画面だけ)。 */
+function sampleConditions(
+  weather: string | undefined,
+  wake: string | undefined,
+): Partial<Conditions> | undefined {
+  const result: Partial<Conditions> = {};
+  if (weather === "sunny" || weather === "cloudy" || weather === "rain") {
+    result.weather = weather;
+  }
+  const minutes = Number(wake);
+  if (WAKE_OPTIONS.includes(minutes)) result.wake = minutes;
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 export function sampleFor(
@@ -996,6 +1012,7 @@ export function sampleFor(
           <MiniGameView
             backHref={`/_dev/s05?role=${role}`}
             kinds={sampleKinds(one(params.events))}
+            conditions={sampleConditions(one(params.weather), one(params.wake))}
           />
         ),
       };

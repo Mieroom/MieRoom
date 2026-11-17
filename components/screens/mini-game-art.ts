@@ -5,12 +5,13 @@ import {
   CROSSING_WAIT,
   DEADLINE_MINUTE,
   PLAYER,
-  ROUTE_LENGTH,
   STAGE_STARTS,
   STAMINA_MAX,
   WORLD,
   type GameEvent,
   type GameState,
+  type Obstacle,
+  type Weather,
 } from "@/lib/domain/mini-game";
 
 // 「遅刻ダッシュ」のドット絵。320×120 の小さな絵に描いて、画面では整数倍に引き伸ばす
@@ -236,14 +237,28 @@ function drawSchoolBg(ctx: CanvasRenderingContext2D, distance: number) {
 
 // ---------------------------------------------------------------- 背景: 家の中
 
-function drawHomeBg(ctx: CanvasRenderingContext2D, distance: number) {
+const SKY: Record<Weather, { sky: string; light: string; cloud: string }> = {
+  sunny: { sky: "#bfe3ff", light: "#d6efff", cloud: "#ffffff" },
+  cloudy: { sky: "#c4ccd9", light: "#d8dde7", cloud: "#eef1f6" },
+  rain: { sky: "#8f9bb0", light: "#a9b4c6", cloud: "#7d8799" },
+};
+
+function drawHomeBg(
+  ctx: CanvasRenderingContext2D,
+  distance: number,
+  weather: Weather,
+) {
   rect(ctx, C.cream, 0, CEILING, ART.width, GROUND - CEILING);
   tiles(distance, 0.6, 16, (x) => rect(ctx, C.creamLine, x, CEILING, 2, 84));
   // 朝の光が入る窓 (カーテンつき)
   tiles(distance, 0.6, 130, (x) => {
     rect(ctx, C.frame, x + 30, 22, 34, 32);
-    rect(ctx, C.sky, x + 32, 24, 30, 28);
-    rect(ctx, C.gold, x + 52, 26, 8, 8); // 朝日
+    rect(ctx, SKY[weather].sky, x + 32, 24, 30, 28);
+    if (weather === "sunny") rect(ctx, C.gold, x + 52, 26, 8, 8); // 朝日
+    if (weather === "rain") {
+      for (let k = 0; k < 4; k++)
+        rect(ctx, "#dfe9f7", x + 36 + k * 6, 28 + k * 3, 1, 3);
+    }
     rect(ctx, C.frame, x + 46, 24, 2, 28);
     rect(ctx, "#e58aa0", x + 27, 20, 7, 36);
     rect(ctx, "#e58aa0", x + 60, 20, 7, 36);
@@ -276,14 +291,20 @@ function drawHomeBg(ctx: CanvasRenderingContext2D, distance: number) {
 const HOUSE_WALL = ["#f4e1c1", "#e3eef7", "#efd5d5"];
 const HOUSE_ROOF = ["#b35a4a", "#5a6f94", "#6b7a52"];
 
-function drawStreetBg(ctx: CanvasRenderingContext2D, distance: number) {
-  rect(ctx, C.sky, 0, CEILING, ART.width, GROUND - CEILING);
-  rect(ctx, C.skyLight, 0, 60, ART.width, GROUND - 60);
-  // 雲
-  tiles(distance, 0.1, 110, (x, index) => {
-    const y = 20 + (index % 3) * 6;
-    rect(ctx, C.cloud, x + 20, y + 2, 26, 5);
-    rect(ctx, C.cloud, x + 26, y, 14, 3);
+function drawStreetBg(
+  ctx: CanvasRenderingContext2D,
+  distance: number,
+  weather: Weather,
+) {
+  const sky = SKY[weather];
+  rect(ctx, sky.sky, 0, CEILING, ART.width, GROUND - CEILING);
+  rect(ctx, sky.light, 0, 60, ART.width, GROUND - 60);
+  // 雲 (雨の日は、厚く暗い)
+  tiles(distance, 0.1, weather === "sunny" ? 110 : 70, (x, index) => {
+    const y = 18 + (index % 3) * 6;
+    const wide = weather === "sunny" ? 26 : 40;
+    rect(ctx, sky.cloud, x + 20, y + 2, wide, 5);
+    rect(ctx, sky.cloud, x + 26, y, wide - 12, 3);
   });
   // 遠くの家
   tiles(distance, 0.35, 90, (x, index) => {
@@ -317,10 +338,34 @@ function drawStreetBg(ctx: CanvasRenderingContext2D, distance: number) {
     rect(ctx, "#5fb067", x + 146, GROUND - 44, 12, 6);
   });
   // 道路
-  rect(ctx, C.asphalt, 0, GROUND, ART.width, ART.height - GROUND);
-  rect(ctx, C.sidewalk, 0, GROUND, ART.width, 6);
+  rect(
+    ctx,
+    weather === "rain" ? "#4f5668" : C.asphalt,
+    0,
+    GROUND,
+    ART.width,
+    ART.height - GROUND,
+  );
+  rect(
+    ctx,
+    weather === "rain" ? "#9aa1b2" : C.sidewalk,
+    0,
+    GROUND,
+    ART.width,
+    6,
+  );
   rect(ctx, "#8d93a3", 0, GROUND + 6, ART.width, 1);
   tiles(distance, 1, 40, (x) => rect(ctx, "#e8e8e8", x, GROUND + 14, 20, 2));
+}
+
+/** 雨のすじ (屋外だけ)。時間で流れる。 */
+function drawRain(ctx: CanvasRenderingContext2D, time: number) {
+  const shift = Math.floor(time * 140);
+  for (let k = 0; k < 46; k++) {
+    const x = (k * 37 + shift * 0 + ((k * 13) % 7) * 11) % ART.width;
+    const y = (k * 23 + shift) % (ART.height - CEILING);
+    rect(ctx, "#dfe9f7", (x + (y >> 2)) % ART.width, CEILING + y, 1, 4);
+  }
 }
 
 // ---------------------------------------------------------------- 小道具: 家のドア・校門・教室のドア
@@ -370,13 +415,22 @@ const MOTHER_COLOR: Record<string, string> = {
   W: "#ffffff",
 };
 
+const APRON = ["#e58aa0", "#f2c94c", "#6fa8e6"];
+
 function drawMother(
   ctx: CanvasRenderingContext2D,
   x: number,
   angry: boolean,
   time: number,
+  variant: number,
 ) {
-  sprite(ctx, MOTHER, MOTHER_COLOR, x, GROUND - MOTHER.length);
+  sprite(
+    ctx,
+    MOTHER,
+    { ...MOTHER_COLOR, P: APRON[variant % 3] },
+    x,
+    GROUND - MOTHER.length,
+  );
   if (angry && Math.floor(time * 6) % 2 === 0) {
     const y = GROUND - MOTHER.length - 7;
     rect(ctx, "#ff3b3b", x + 8, y, 1, 5);
@@ -421,15 +475,19 @@ function drawObasan(
   event: Extract<GameEvent, { kind: "obasan" }>,
   time: number,
 ) {
+  const dress = {
+    ...OBASAN_COLOR,
+    P: ["#8a5fb0", "#4f9a55", "#d9905a"][event.variant % 3],
+  };
   if (event.phase === "done" && event.helped) {
     // 起き上がって、手を振っている
     const wave = Math.floor(time * 4) % 2 === 0;
-    sprite(ctx, OBASAN_STANDING, OBASAN_COLOR, x + 6, GROUND - 14);
+    sprite(ctx, OBASAN_STANDING, dress, x + 6, GROUND - 14);
     rect(ctx, C.skin, x + 5, GROUND - (wave ? 11 : 9), 1, 3);
     rect(ctx, "#ff7b8a", x + 14, GROUND - 17, 2, 2); // ハート
     return;
   }
-  sprite(ctx, OBASAN_LYING, OBASAN_COLOR, x, GROUND - 4);
+  sprite(ctx, OBASAN_LYING, dress, x, GROUND - 4);
 }
 
 function drawCrossing(
@@ -489,26 +547,42 @@ const DOG_COLOR: Record<string, string> = {
 };
 
 /** 追ってくる犬 (キャラの後ろから)。走ると、足と舌が動く。 */
-function drawDog(ctx: CanvasRenderingContext2D, x: number, time: number) {
+const DOG_COAT = ["#a06a3a", "#d9b44a", "#6b6b75"];
+
+function drawDog(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  time: number,
+  variant: number,
+) {
   const top = GROUND - 9;
-  sprite(ctx, DOG, DOG_COLOR, x, top);
+  const coat = DOG_COAT[variant % 3];
+  sprite(ctx, DOG, { ...DOG_COLOR, B: coat, T: coat }, x, top);
   const frame = Math.floor(time * 12) % 2;
   rect(ctx, "#7a4a22", x + 2, GROUND - 3, 2, 3 + frame);
   rect(ctx, "#7a4a22", x + 5 - frame, GROUND - 3, 2, 3);
   rect(ctx, "#7a4a22", x + 9, GROUND - 3, 2, 3 + (1 - frame));
   rect(ctx, "#7a4a22", x + 11 + frame, GROUND - 3, 2, 3);
   rect(ctx, "#e0566a", x + 12, top + 4, 2, 1 + frame); // 舌
-  rect(ctx, "#a06a3a", x - 2, top + 1 + frame, 2, 2); // しっぽ
+  rect(ctx, coat, x - 2, top + 1 + frame, 2, 2); // しっぽ
 }
+
+const VENDING_COLOR = [
+  ["#9e2b20", "#c0392b"],
+  ["#1f4f86", "#2f6fb5"],
+  ["#2a7a45", "#3a9a5a"],
+];
 
 function drawVending(
   ctx: CanvasRenderingContext2D,
   x: number,
   glowing: boolean,
+  variant: number,
 ) {
   const top = GROUND - 30;
-  rect(ctx, "#9e2b20", x, top, 14, 30);
-  rect(ctx, "#c0392b", x + 1, top + 1, 12, 28);
+  const [dark, body] = VENDING_COLOR[variant % 3];
+  rect(ctx, dark, x, top, 14, 30);
+  rect(ctx, body, x + 1, top + 1, 12, 28);
   rect(ctx, "#ffffff", x + 2, top + 2, 10, 3);
   rect(ctx, glowing ? "#bfe6ff" : "#1f2a44", x + 2, top + 6, 10, 14);
   const colors = ["#e0566a", "#4f9a55", "#f2c94c"];
@@ -564,25 +638,34 @@ function drawPerson(
   }
 }
 
-const FRIEND_COLOR: Record<string, string> = {
-  H: "#3a2a1a",
-  S: C.skin,
-  K: C.ink,
-  U: "#4a6fb5",
-  W: C.white,
-  P: "#2b3558",
-};
-const TEACHER_COLOR: Record<string, string> = {
-  H: "#8a8a92",
-  S: C.skin,
-  K: C.ink,
-  U: "#555d78",
-  W: C.white,
-  P: "#3a3f55",
-};
+const FRIEND_HAIR = ["#3a2a1a", "#b5651d", "#d9b44a"];
+const FRIEND_UNIFORM = ["#4a6fb5", "#5a8f6a", "#8a6fb5"];
+function friendColor(variant: number): Record<string, string> {
+  return {
+    H: FRIEND_HAIR[variant % 3],
+    S: C.skin,
+    K: C.ink,
+    U: FRIEND_UNIFORM[variant % 3],
+    W: C.white,
+    P: "#2b3558",
+  };
+}
+const TEACHER_SUIT = ["#555d78", "#3a4a3a", "#5a4a3a"];
+function teacherColor(variant: number): Record<string, string> {
+  return {
+    H: "#8a8a92",
+    S: C.skin,
+    K: C.ink,
+    U: TEACHER_SUIT[variant % 3],
+    W: C.white,
+    P: "#3a3f55",
+  };
+}
 
 /** 飛び出してくる自転車 (右から、キャラの前へ)。 */
-function drawBike(ctx: CanvasRenderingContext2D, x: number) {
+const SHIRT = ["#3a7bd5", "#d9902a", "#4f9a55"];
+
+function drawBike(ctx: CanvasRenderingContext2D, x: number, variant: number) {
   for (const wx of [x, x + 11]) {
     rect(ctx, C.ink, wx + 1, GROUND - 5, 3, 1);
     rect(ctx, C.ink, wx, GROUND - 4, 1, 3);
@@ -592,16 +675,18 @@ function drawBike(ctx: CanvasRenderingContext2D, x: number) {
   rect(ctx, "#d33b3b", x + 2, GROUND - 6, 11, 1);
   rect(ctx, "#d33b3b", x + 6, GROUND - 9, 1, 4);
   rect(ctx, C.ink, x + 11, GROUND - 9, 3, 1);
-  rect(ctx, "#3a7bd5", x + 5, GROUND - 15, 3, 6);
+  rect(ctx, SHIRT[variant % 3], x + 5, GROUND - 15, 3, 6);
   rect(ctx, C.skin, x + 5, GROUND - 19, 4, 4);
   rect(ctx, "#3a2a1a", x + 5, GROUND - 20, 4, 1);
   rect(ctx, "#2b3558", x + 6, GROUND - 9, 2, 3);
 }
 
-function drawTrain(ctx: CanvasRenderingContext2D, x: number) {
+const TRAIN_STRIPE = ["#3f6fb5", "#4f9a55", "#d9902a"];
+
+function drawTrain(ctx: CanvasRenderingContext2D, x: number, variant: number) {
   const top = GROUND - 38;
   rect(ctx, "#e8ecf6", x, top, 120, 30);
-  rect(ctx, "#3f6fb5", x, top + 20, 120, 5);
+  rect(ctx, TRAIN_STRIPE[variant % 3], x, top + 20, 120, 5);
   rect(ctx, "#cdd3e6", x, top, 120, 2);
   for (let k = 0; k < 5; k++) {
     rect(ctx, C.window, x + 8 + k * 22, top + 6, 16, 10);
@@ -611,7 +696,66 @@ function drawTrain(ctx: CanvasRenderingContext2D, x: number) {
   rect(ctx, "#2b3558", x + 100, top + 30, 12, 4);
 }
 
-// ---------------------------------------------------------------- 障害物 (バッグ)
+// ---------------------------------------------------------------- 障害物 (バッグ・ごみ箱・水たまり・猫)
+
+function drawBin(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  worldWidth: number,
+  worldHeight: number,
+) {
+  const w = Math.max(9, Math.round(worldWidth / 2));
+  const h = Math.max(12, Math.round(worldHeight / 2));
+  const top = GROUND - h;
+  rect(ctx, "#6f7a8c", x, top + 2, w, h - 2);
+  rect(ctx, "#8d99ad", x + 1, top + 3, 1, h - 4);
+  rect(ctx, "#56606f", x + w - 1, top + 3, 1, h - 3);
+  rect(ctx, "#56606f", x - 1, top, w + 2, 2); // ふた
+  rect(ctx, "#56606f", x + 2, top + 5, w - 4, 1);
+  rect(ctx, "#56606f", x + 2, top + 9, w - 4, 1);
+}
+
+function drawPuddle(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  worldWidth: number,
+) {
+  const w = Math.max(14, Math.round(worldWidth / 2));
+  rect(ctx, "#6f9fd4", x, GROUND - 2, w, 2);
+  rect(ctx, "#8fbbe8", x + 2, GROUND - 3, w - 4, 1);
+  rect(ctx, "#dff2ff", x + 3, GROUND - 2, 3, 1);
+}
+
+function drawCat(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  worldHeight: number,
+  time: number,
+) {
+  const h = Math.max(9, Math.round(worldHeight / 2));
+  const top = GROUND - h;
+  rect(ctx, "#d9902a", x + 1, top + 4, 8, h - 4); // 体
+  rect(ctx, "#d9902a", x, top, 8, 5); // 頭
+  rect(ctx, "#d9902a", x, top - 2, 2, 2); // 耳
+  rect(ctx, "#d9902a", x + 6, top - 2, 2, 2);
+  rect(ctx, C.ink, x + 2, top + 2, 1, 1);
+  rect(ctx, C.ink, x + 5, top + 2, 1, 1);
+  const sway = Math.floor(time * 3) % 2;
+  rect(ctx, "#d9902a", x + 9, top + 4 - sway, 2, h - 6); // しっぽ
+  rect(ctx, "#b87420", x + 2, top + 6, 6, 1);
+}
+
+function drawObstacle(
+  ctx: CanvasRenderingContext2D,
+  obstacle: Obstacle,
+  x: number,
+  time: number,
+) {
+  if (obstacle.kind === "bin") drawBin(ctx, x, obstacle.width, obstacle.height);
+  else if (obstacle.kind === "puddle") drawPuddle(ctx, x, obstacle.width);
+  else if (obstacle.kind === "cat") drawCat(ctx, x, obstacle.height, time);
+  else drawBag(ctx, x, obstacle.width, obstacle.height);
+}
 
 function drawBag(
   ctx: CanvasRenderingContext2D,
@@ -925,7 +1069,7 @@ function drawHud(ctx: CanvasRenderingContext2D, game: GameState) {
   const barLeft = 112;
   const barWidth = 96;
   rect(ctx, "#4a5680", barLeft, 6, barWidth, 3);
-  const done = Math.round((barWidth * game.distance) / ROUTE_LENGTH);
+  const done = Math.round((barWidth * game.distance) / game.routeLength);
   rect(ctx, C.gold, barLeft, 6, done, 3);
   rect(ctx, C.alert, barLeft + Math.min(barWidth - 2, done), 3, 2, 8);
   // 締め切り (旗と時刻)
@@ -948,13 +1092,13 @@ export function drawScene(
   ctx.clearRect(0, 0, ART.width, ART.height);
 
   // 場面ごとの背景
-  clipped(ctx, -9999, homeEnd, () => drawHomeBg(ctx, d));
-  clipped(ctx, homeEnd, schoolStart, () => drawStreetBg(ctx, d));
+  clipped(ctx, -9999, homeEnd, () => drawHomeBg(ctx, d, game.weather));
+  clipped(ctx, homeEnd, schoolStart, () => drawStreetBg(ctx, d, game.weather));
   clipped(ctx, schoolStart, 9999, () => drawSchoolBg(ctx, d));
   // 境目のドアと校門、ゴールの教室のドア
   drawHomeDoor(ctx, homeEnd);
   drawGate(ctx, schoolStart);
-  drawDoor(ctx, edge(ROUTE_LENGTH + 20) - 8, 201);
+  drawDoor(ctx, edge(game.routeLength + 20) - 8, 201);
 
   const crossing = game.events.find((item) => item.kind === "crossing");
   // 電車 (踏切の向こうを、右から左へ通る)
@@ -964,24 +1108,34 @@ export function drawScene(
       1,
       Math.max(0, (crossing.elapsed - 0.4) / (span - 1)),
     );
-    drawTrain(ctx, Math.round(ART.width - progress * (ART.width + 130)));
+    drawTrain(
+      ctx,
+      Math.round(ART.width - progress * (ART.width + 130)),
+      crossing.variant,
+    );
   }
 
   // できごとの小道具
   for (const event of game.events) {
     if (event.kind === "mother") {
-      drawMother(ctx, edge(event.at + 80), event.phase === "scold", game.time);
+      drawMother(
+        ctx,
+        edge(event.at + 80),
+        event.phase === "scold",
+        game.time,
+        event.variant,
+      );
     } else if (event.kind === "obasan") {
       drawObasan(ctx, edge(event.at), event, game.time);
     } else if (event.kind === "crossing") {
       drawCrossing(ctx, edge(event.at), event, game.time);
     } else if (event.kind === "vending") {
-      drawVending(ctx, edge(event.at), event.phase === "drink");
+      drawVending(ctx, edge(event.at), event.phase === "drink", event.variant);
     } else if (event.kind === "friend") {
       drawPerson(
         ctx,
         edge(event.at),
-        FRIEND_COLOR,
+        friendColor(event.variant),
         event.phase === "ask"
           ? "dots"
           : event.phase === "talk"
@@ -993,20 +1147,25 @@ export function drawScene(
       drawPerson(
         ctx,
         edge(event.at + 100),
-        TEACHER_COLOR,
+        teacherColor(event.variant),
         event.phase === "greet" ? "talk" : "none",
         game.time,
       );
     } else if (event.kind === "bike" && event.phase === "warn") {
       // 右から、キャラの目の前まで飛び出してくる
       const progress = Math.min(1, event.elapsed / BIKE_WINDOW);
-      drawBike(ctx, Math.round(150 - progress * 100));
+      drawBike(ctx, Math.round(150 - progress * 100), event.variant);
     }
   }
   // 追ってくる犬
   if (game.chase) {
     // 犬との距離が縮むほど、キャラに近づく (最初の距離でも、画面の端に見える)
-    drawDog(ctx, Math.round(36 - game.chase.gap / 6 - 14), game.time);
+    drawDog(
+      ctx,
+      Math.round(36 - game.chase.gap / 6 - 14),
+      game.time,
+      game.chase.variant,
+    );
   }
 
   // 障害物 (おばさんの体は、おばさんの絵で描く)
@@ -1014,10 +1173,14 @@ export function drawScene(
     if (obstacle.body) continue;
     const x = edge(obstacle.at);
     if (x > -20 && x < ART.width + 4) {
-      drawBag(ctx, x, obstacle.width, obstacle.height);
+      drawObstacle(ctx, obstacle, x, game.time);
     }
   }
 
   drawPlayer(ctx, game, character);
+  // 雨 (屋外だけ)
+  if (game.weather === "rain") {
+    clipped(ctx, homeEnd, schoolStart, () => drawRain(ctx, game.time));
+  }
   drawHud(ctx, game);
 }

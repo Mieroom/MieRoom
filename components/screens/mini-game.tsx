@@ -14,11 +14,14 @@ import {
   startGame,
   stepGame,
   summarize,
+  type Conditions,
   type EventKind,
   type EventView,
   type GameState,
   type Pace,
   type Summary,
+  type Weather,
+  WEATHER_NAMES,
 } from "@/lib/domain/mini-game";
 import { ART, CHARACTERS, drawScene } from "./mini-game-art";
 
@@ -70,37 +73,57 @@ function writeCharacter(id: string) {
   }
 }
 
-/** できごとの最中に、画面へ出す文。 */
+/** できごとの最中に、画面へ出す文。variant (0〜2) で、毎回、せりふが変わる。 */
+const TITLES: Record<string, string[]> = {
+  mother: ["早く起きなさい!!", "また寝坊したの!?", "遅刻するわよ!!"],
+  obasan: [
+    "おばさんが倒れている!",
+    "おばさんがうずくまっている!",
+    "おばさんが動けない!",
+  ],
+  crossing: ["踏切が閉まった!", "カンカンカン…踏切だ!", "遮断機が下りてきた!"],
+  dog: ["犬が追ってくる!!", "野良犬だ!!", "大きな犬が吠えている!!"],
+  vending: ["自販機がある!", "冷たい飲み物の自販機!", "自販機を見つけた!"],
+  friend: ["友達に会った!", "クラスメイトに呼ばれた!", "友達が手を振っている!"],
+  bike: ["危ない!!", "自転車が来た!!", "ぶつかる!!"],
+  teacher: [
+    "先生が呼び止める!",
+    "先生が校門に立っている!",
+    "朝のあいさつ運動だ!",
+  ],
+};
+
 function eventText(view: EventView): { title: string; hint: string } {
+  const title = (kind: string) => TITLES[kind][view.variant % 3];
   if (view.kind === "dog") {
-    return { title: "犬が追ってくる!!", hint: "→ ダッシュで逃げろ!" };
+    return { title: title("dog"), hint: "→ ダッシュで逃げろ!" };
   }
   if (view.kind === "vending") {
     return view.phase === "ask"
-      ? { title: "自販機がある!", hint: "ひと息つく?(2 秒)" }
+      ? { title: title("vending"), hint: "ひと息つく?(2 秒)" }
       : { title: "ごくごく…", hint: "スタミナが戻る" };
   }
   if (view.kind === "friend") {
     return view.phase === "ask"
-      ? { title: "友達に会った!", hint: "立ち話する?(3 秒)" }
+      ? { title: title("friend"), hint: "立ち話する?(3 秒)" }
       : { title: "おしゃべり中…", hint: "おにぎりをもらう" };
   }
   if (view.kind === "bike") {
-    return { title: "危ない!!", hint: "タップ / スペース!" };
+    return { title: title("bike"), hint: "タップ / スペース!" };
   }
   if (view.kind === "teacher") {
-    return { title: "先生が呼び止める!", hint: "連打であいさつ!" };
+    return { title: title("teacher"), hint: "連打であいさつ!" };
   }
   if (view.kind === "mother") {
-    return { title: "早く起きなさい!!", hint: "連打で言い訳しよう!" };
+    return { title: title("mother"), hint: "連打で言い訳しよう!" };
   }
   if (view.kind === "obasan") {
     return view.phase === "ask"
-      ? { title: "おばさんが倒れている!", hint: "どうする?" }
+      ? { title: title("obasan"), hint: "どうする?" }
       : { title: "大丈夫ですか!?", hint: "連打で起こそう!" };
   }
   if (view.phase === "ask") {
-    return { title: "踏切が閉まった!", hint: "どうする?" };
+    return { title: title("crossing"), hint: "どうする?" };
   }
   if (view.phase === "wait") {
     return { title: "電車が通過中…", hint: "開くまで待つ" };
@@ -121,6 +144,20 @@ const CHOICES: Record<string, [string, string]> = {
 };
 
 const RECENT_KEY = "mieroom.miniGame.recent";
+const LAST_KEY = "mieroom.miniGame.last";
+
+/** 前回の条件 (天気・起床時刻)。同じ条件が続かないように、選ぶときに使う。 */
+function readLast(): { weather?: string; wake?: number } {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(LAST_KEY) ?? "{}");
+    return {
+      weather: typeof raw?.weather === "string" ? raw.weather : undefined,
+      wake: typeof raw?.wake === "number" ? raw.wake : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
 
 /** 直近 2 回のできごと (新しい順)。同じものが続かないように、選ぶときに使う。 */
 function readRecent(): string[][] {
@@ -146,17 +183,35 @@ function rememberRun(state: GameState) {
       RECENT_KEY,
       JSON.stringify([kinds, ...readRecent()].slice(0, 2)),
     );
+    window.localStorage.setItem(
+      LAST_KEY,
+      JSON.stringify({ weather: state.weather, wake: state.startMinute }),
+    );
   } catch {
     // 保存できなくても、遊べる
   }
 }
 
-function freshGame(kinds?: EventKind[]): GameState {
-  return createGame(Math.random, { recent: readRecent(), kinds });
+function freshGame(
+  kinds?: EventKind[],
+  conditions?: Partial<Conditions>,
+): GameState {
+  return createGame(Math.random, {
+    recent: readRecent(),
+    previous: readLast(),
+    kinds,
+    conditions,
+  });
 }
 
 /** kinds: できごとを決めて遊ぶ (開発用の見本画面だけ。本物のページでは渡さない)。 */
-export function MiniGame({ kinds }: { kinds?: EventKind[] } = {}) {
+export function MiniGame({
+  kinds,
+  conditions,
+}: {
+  kinds?: EventKind[];
+  conditions?: Partial<Conditions>;
+} = {}) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const game = useRef<GameState>(createGame());
   const best = useRef(0);
@@ -166,12 +221,24 @@ export function MiniGame({ kinds }: { kinds?: EventKind[] } = {}) {
   // 押している向き (← ゆっくり / → ダッシュ)。キーと、画面のボタンの両方
   const held = useRef({ left: false, right: false });
   const [character, setCharacter] = useState(0);
+  // 今日の条件 (起きた時刻・天気)。毎回変わる
+  const [today, setToday] = useState<{ wake: number; weather: Weather }>({
+    wake: START_MINUTE,
+    weather: "sunny",
+  });
   const [phase, setPhase] = useState<Phase>("ready");
   const [view, setView] = useState<EventView | null>(null);
   const [bestMargin, setBestMargin] = useState(0);
   const [result, setResult] = useState<(Summary & { isBest: boolean }) | null>(
     null,
   );
+
+  // 新しいゲームを作り、今日の条件を画面に出す
+  const makeGame = useCallback(() => {
+    const created = freshGame(kinds, conditions);
+    setToday({ wake: created.startMinute, weather: created.weather });
+    return created;
+  }, [kinds, conditions]);
 
   // 押している向きから、速さを決める (両方を押すと、ふつう)
   const applyPace = useCallback(() => {
@@ -198,7 +265,7 @@ export function MiniGame({ kinds }: { kinds?: EventKind[] } = {}) {
     } else if (state.status === "playing") {
       pressInGame(state);
     } else if (performance.now() - overAt.current > RESTART_LOCK_MS) {
-      game.current = freshGame(kinds);
+      game.current = makeGame();
       startGame(game.current);
       rememberRun(game.current);
       applyPace();
@@ -207,7 +274,7 @@ export function MiniGame({ kinds }: { kinds?: EventKind[] } = {}) {
       viewKey.current = "null";
       setPhase("playing");
     }
-  }, [applyPace, kinds]);
+  }, [applyPace, makeGame]);
 
   // 選ぶ (助ける / 通り過ぎる、待つ / 渡る)
   const pick = useCallback((option: 0 | 1) => {
@@ -229,7 +296,7 @@ export function MiniGame({ kinds }: { kinds?: EventKind[] } = {}) {
     const ctx = element?.getContext("2d");
     if (!element || !ctx) return;
     // 前回までのできごとを避けて、この回のゲームを作り直す (まだ始まっていない)
-    game.current = freshGame(kinds);
+    game.current = makeGame();
     const savedBest = readBest();
     best.current = savedBest;
     setBestMargin(savedBest);
@@ -276,7 +343,7 @@ export function MiniGame({ kinds }: { kinds?: EventKind[] } = {}) {
     // 別のタブに移ったら、最初からにする (走りっぱなしで時間が過ぎないように)
     const onHidden = () => {
       if (document.hidden && game.current.status === "playing") {
-        game.current = freshGame(kinds);
+        game.current = makeGame();
         held.current = { left: false, right: false };
         setPhase("ready");
         setView(null);
@@ -325,7 +392,7 @@ export function MiniGame({ kinds }: { kinds?: EventKind[] } = {}) {
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [press, changeCharacter, hold, applyPace, kinds]);
+  }, [press, changeCharacter, hold, applyPace, makeGame]);
 
   const over = phase === "arrived" || phase === "late";
   const message = view ? eventText(view) : null;
@@ -450,11 +517,16 @@ export function MiniGame({ kinds }: { kinds?: EventKind[] } = {}) {
               {phase === "ready" && (
                 <>
                   <p className="text-base font-bold tracking-widest">
-                    {clockText(START_MINUTE)} 起床! {clockText(DEADLINE_MINUTE)}{" "}
+                    {clockText(today.wake)} 起床! {clockText(DEADLINE_MINUTE)}{" "}
                     までに教室へ!
                   </p>
                   <p className="text-xs">
                     タップ / スペースで スタート(ジャンプも同じ)
+                  </p>
+                  <p className="text-xs">
+                    今日の天気: {WEATHER_NAMES[today.weather]}
+                    {today.weather === "rain" && "(転ぶと長く止まる)"}
+                    {today.wake > START_MINUTE && "  ※寝坊!"}
                   </p>
                   <p className="text-xs opacity-80">
                     → ダッシュ(スタミナを使う) / ← ゆっくり(スタミナが戻る)

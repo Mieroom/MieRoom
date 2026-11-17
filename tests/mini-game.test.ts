@@ -41,12 +41,16 @@ import {
   stageAt,
   START_MINUTE,
   startGame,
+  RAIN_STUN_SECONDS,
   STUN_SECONDS,
   stepGame,
+  stunSeconds,
   summarize,
   TEACHER_MAX,
   TEACHER_TAPS,
   VENDING_SECONDS,
+  WAKE_OPTIONS,
+  type Weather,
   type EventKind,
   type GameState,
 } from "@/lib/domain/mini-game";
@@ -54,18 +58,24 @@ import {
 // ミニゲーム「遅刻ダッシュ」: 合言葉、時刻、できごと (8 種類)、転ぶ、着く / 遅刻。
 
 const fixed = (value: number) => () => value;
+/** いつもの日: 8:00 起床、晴れ、決まった道のり。(条件がランダムでも、規則の確認は、ぶれない) */
+const TODAY = {
+  wake: START_MINUTE,
+  weather: "sunny" as const,
+  routeLength: ROUTE_LENGTH,
+};
 /** rand = 0 のゲーム: お母さん (150)、おばさん (3200)、踏切 (8000) の 3 つが起きる。 */
 function newGame(
   rand: () => number = fixed(0),
   kinds: EventKind[] = ["mother", "obasan", "crossing"],
 ): GameState {
-  const state = createGame(rand, { kinds });
+  const state = createGame(rand, { kinds, conditions: TODAY });
   startGame(state);
   return state;
 }
 /** 種類を決めて、その 1 つだけが起きるゲーム (位置は、起きうる範囲の始め)。 */
 function onlyGame(kind: EventKind): GameState {
-  const state = createGame(fixed(0), { kinds: [kind] });
+  const state = createGame(fixed(0), { kinds: [kind], conditions: TODAY });
   clearObstacles(state);
   startGame(state);
   return state;
@@ -191,7 +201,10 @@ describe("ゲームの作り方 (できごと・障害物)", () => {
   });
   it("種類を指定すると、その種類だけが起きる。乱数が 0 のときは、1 つだけ起きる", () => {
     expect(createGame(fixed(0)).events).toHaveLength(1);
-    const state = createGame(fixed(0.5), { kinds: ["dog", "bike"] });
+    const state = createGame(fixed(0.5), {
+      kinds: ["dog", "bike"],
+      conditions: TODAY,
+    });
     expect(state.events.map((item) => item.kind)).toEqual(["dog", "bike"]);
   });
   it("障害物は、家の中とできごとの前後に置かない。間隔は、跳び越えられる長さより長い", () => {
@@ -225,7 +238,7 @@ describe("ゲームの作り方 (できごと・障害物)", () => {
 
 describe("走る・跳ぶ・着く・遅刻", () => {
   it("始める前は進まない。始めると進み、点数 (m) になる", () => {
-    const state = createGame(fixed(0.99));
+    const state = createGame(fixed(0.99), { conditions: TODAY });
     stepGame(state, 1);
     expect(state.distance).toBe(0);
     startGame(state);
@@ -291,7 +304,9 @@ describe("転ぶ", () => {
   it("障害物にぶつかると、2 秒止まる。同じ障害物には、二度ぶつからない。時刻は進む", () => {
     const state = newGame(fixed(0.99));
     state.events = [];
-    state.obstacles = [{ at: 400, width: 30, height: 40, hit: false }];
+    state.obstacles = [
+      { kind: "bag", at: 400, width: 30, height: 40, hit: false },
+    ];
     state.distance = 400 - 10; // 障害物が、キャラの体に重なる位置
     stepGame(state, 0.016);
     expect(state.stun).toBe(STUN_SECONDS);
@@ -310,7 +325,9 @@ describe("転ぶ", () => {
   it("十分に高く跳んでいれば、障害物の上を越えられる", () => {
     const state = newGame(fixed(0.99));
     state.events = [];
-    state.obstacles = [{ at: 400, width: 30, height: 40, hit: false }];
+    state.obstacles = [
+      { kind: "bag", at: 400, width: 30, height: 40, hit: false },
+    ];
     state.distance = 400 - 10; // 障害物が、キャラの体に重なる位置
     state.y = 60;
     stepGame(state, 0.001);
@@ -636,6 +653,7 @@ describe("できごと: 犬に追いかけられる", () => {
     let call = 0;
     const state = createGame(() => values[Math.min(call++, 1)], {
       kinds: ["dog", "vending"],
+      conditions: TODAY,
     });
     clearObstacles(state);
     startGame(state);
@@ -764,8 +782,168 @@ describe("できごと: 校門で先生に呼び止められる", () => {
     expect(slow.active).toBeNull();
   });
   it("教室の手前 (校門の前) で起きる", () => {
-    const state = createGame(fixed(0.5), { kinds: ["teacher"] });
+    const state = createGame(fixed(0.5), {
+      kinds: ["teacher"],
+      conditions: TODAY,
+    });
     expect(state.events[0].at).toBeGreaterThan(11000);
     expect(state.events[0].at).toBeLessThan(11800);
+  });
+});
+
+describe("今日の条件 (起きた時刻・天気・道のり・障害物)", () => {
+  // 偏りの少ない乱数 (mulberry32)
+  function seeded(seed: number) {
+    let a = seed + 1;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  it("起きた時刻から、時刻が進む。早起きは余裕があり、寝坊は厳しい", () => {
+    const early = createGame(fixed(0.5), {
+      kinds: ["dog"],
+      conditions: { ...TODAY, wake: WAKE_OPTIONS[0] },
+    });
+    startGame(early);
+    expect(clockMinute(early)).toBe(WAKE_OPTIONS[0]);
+    expect(clockText(clockMinute(early))).toBe("7:50");
+    const late = createGame(fixed(0.5), {
+      kinds: ["dog"],
+      conditions: { ...TODAY, wake: WAKE_OPTIONS[2] },
+    });
+    startGame(late);
+    late.events = [];
+    clearObstacles(late);
+    // 起きてから 70 分たった (まだ着いていない): 8:10 起床なら 9:20 で遅刻
+    late.time = 70;
+    stepGame(late, 0.05);
+    expect(late.status).toBe("late");
+    const early2 = createGame(fixed(0.5), {
+      kinds: ["dog"],
+      conditions: { ...TODAY, wake: WAKE_OPTIONS[0] },
+    });
+    startGame(early2);
+    early2.events = [];
+    clearObstacles(early2);
+    // 7:50 起床なら、同じ 70 分でも 9:00。まだ間に合う
+    early2.time = 70;
+    stepGame(early2, 0.05);
+    expect(early2.status).toBe("playing");
+  });
+  it("雨の日は、転ぶと 3 秒止まる。ほかの日は 2 秒", () => {
+    const rain = createGame(fixed(0.5), {
+      kinds: ["dog"],
+      conditions: { ...TODAY, weather: "rain" },
+    });
+    expect(stunSeconds(rain)).toBe(RAIN_STUN_SECONDS);
+    expect(stunSeconds(newGame())).toBe(STUN_SECONDS);
+    startGame(rain);
+    rain.events = [];
+    rain.obstacles = [
+      { kind: "bag", at: 400, width: 30, height: 40, hit: false },
+    ];
+    rain.distance = 390;
+    stepGame(rain, 0.016);
+    expect(rain.stun).toBe(RAIN_STUN_SECONDS);
+  });
+  it("条件は、毎回ランダム。範囲に収まり、3 種類の天気と 3 つの起床時刻が出る", () => {
+    const weathers = new Set<string>();
+    const wakes = new Set<number>();
+    for (let seed = 0; seed < 400; seed++) {
+      const state = createGame(seeded(seed));
+      weathers.add(state.weather);
+      wakes.add(state.startMinute);
+      expect(WAKE_OPTIONS).toContain(state.startMinute);
+      expect(state.routeLength).toBeGreaterThanOrEqual(ROUTE_LENGTH * 0.95 - 1);
+      expect(state.routeLength).toBeLessThanOrEqual(ROUTE_LENGTH * 1.05 + 1);
+    }
+    expect([...weathers].sort()).toEqual(["cloudy", "rain", "sunny"]);
+    expect([...wakes].sort()).toEqual([...WAKE_OPTIONS].sort());
+  });
+  it("寝坊 (8:10) の日は、雨にならず、できごとは 2 つまで", () => {
+    for (let seed = 0; seed < 400; seed++) {
+      const state = createGame(seeded(seed), {
+        conditions: { wake: WAKE_OPTIONS[2] },
+      });
+      expect(state.weather).not.toBe("rain");
+      expect(state.events.length).toBeLessThanOrEqual(2);
+    }
+    // 条件を決めたときは、そのまま
+    expect(
+      createGame(fixed(0), {
+        conditions: { wake: WAKE_OPTIONS[2], weather: "rain" },
+      }).weather,
+    ).toBe("rain");
+  });
+  it("前回と同じ天気・同じ起床時刻は、出にくい", () => {
+    const share = (previous: { weather?: string; wake?: number }) => {
+      let rain = 0;
+      let wake = 0;
+      for (let seed = 0; seed < 2000; seed++) {
+        const state = createGame(seeded(seed), { previous });
+        if (state.weather === "sunny") rain += 1;
+        if (state.startMinute === WAKE_OPTIONS[1]) wake += 1;
+      }
+      return { sunny: rain, mid: wake };
+    };
+    const plain = share({});
+    const after = share({ weather: "sunny", wake: WAKE_OPTIONS[1] });
+    expect(after.sunny).toBeLessThan(plain.sunny * 0.75);
+    expect(after.mid).toBeLessThan(plain.mid * 0.75);
+    expect(after.sunny).toBeGreaterThan(0);
+  });
+  it("障害物の種類: 水たまりは雨の日だけ。猫は雨の日に出ない。どれも、大きさは範囲の中", () => {
+    const kindsIn = (weather: Weather) => {
+      const kinds = new Set<string>();
+      for (let seed = 0; seed < 60; seed++) {
+        const state = createGame(seeded(seed), {
+          conditions: { weather, wake: START_MINUTE },
+        });
+        for (const item of state.obstacles) {
+          kinds.add(item.kind);
+          if (item.kind === "puddle") expect(item.height).toBeLessThan(10);
+          if (item.kind === "bag") expect(item.height).toBeGreaterThan(20);
+        }
+      }
+      return [...kinds].sort();
+    };
+    expect(kindsIn("sunny")).toEqual(["bag", "bin", "cat"]);
+    expect(kindsIn("cloudy")).toEqual(["bag", "bin", "cat"]);
+    expect(kindsIn("rain")).toEqual(["bag", "bin", "puddle"]);
+  });
+  it("水たまりは、少し跳べば越えられる。ごみ箱・猫は、ふつうに跳べば越えられる", () => {
+    const state = newGame(fixed(0.99));
+    state.events = [];
+    state.obstacles = [
+      { kind: "puddle", at: 400, width: 40, height: 6, hit: false },
+    ];
+    state.distance = 390;
+    state.y = 3;
+    stepGame(state, 0.001);
+    expect(state.stun).toBe(0);
+  });
+  it("できごとの見た目・せりふの違い (0〜2) が、決まる", () => {
+    for (let seed = 0; seed < 200; seed++) {
+      for (const item of createGame(seeded(seed)).events) {
+        expect([0, 1, 2]).toContain(item.variant);
+      }
+    }
+    const state = createGame(fixed(0.5), { kinds: ["mother"] });
+    expect(state.events[0].variant).toBe(1);
+  });
+  it("道のりが違っても、着く判定は、その日の長さで行う", () => {
+    const state = createGame(fixed(0.5), {
+      kinds: [],
+      conditions: { ...TODAY, routeLength: ROUTE_LENGTH - 700 },
+    });
+    startGame(state);
+    clearObstacles(state);
+    state.distance = ROUTE_LENGTH - 705;
+    stepGame(state, 1);
+    expect(state.status).toBe("arrived");
+    expect(state.distance).toBe(ROUTE_LENGTH - 700);
   });
 });

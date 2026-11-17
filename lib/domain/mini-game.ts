@@ -66,6 +66,36 @@ export const ROUTE_LENGTH = 15680;
 export const START_MINUTE = 8 * 60;
 export const DEADLINE_MINUTE = 9 * 60 + 15;
 
+/** 起きた時刻の候補 (分)。早起きは余裕があり、寝坊は厳しい。 */
+export const WAKE_OPTIONS = [7 * 60 + 50, 8 * 60, 8 * 60 + 10];
+export type Weather = "sunny" | "cloudy" | "rain";
+export const WEATHER_NAMES: Record<Weather, string> = {
+  sunny: "晴れ",
+  cloudy: "くもり",
+  rain: "雨",
+};
+/** 天気の選ばれやすさ。 */
+const WEATHER_WEIGHTS: Record<Weather, number> = {
+  sunny: 0.5,
+  cloudy: 0.3,
+  rain: 0.2,
+};
+/** 雨の日は、転ぶと止まる時間が長い (すべって、起き上がりにくい)。 */
+export const RAIN_STUN_SECONDS = 3;
+/** 道のりの長さは、毎回、これだけ (割合) の範囲で変わる。 */
+const ROUTE_VARIATION = 0.05;
+/** 同じ天気・同じ起床時刻が続くときの、選ばれにくさ。 */
+const SAME_AS_LAST_PENALTY = 0.35;
+
+/** その日の条件 (毎回変わる)。 */
+export type Conditions = {
+  /** 起きた時刻 (分) */
+  wake: number;
+  weather: Weather;
+  /** 家から教室までの道のり (px) */
+  routeLength: number;
+};
+
 export type Stage = "home" | "street" | "school";
 /** 場面の切れ目 (道のりの位置)。家のドアと、校門。 */
 export const STAGE_STARTS: { stage: Stage; from: number }[] = [
@@ -119,6 +149,8 @@ export type GameEvent =
   | {
       kind: "mother";
       at: number;
+      /** 見た目・せりふの違い (0〜2)。毎回、ランダムに変わる */
+      variant: number;
       phase: "idle" | "scold" | "done";
       taps: number;
       elapsed: number;
@@ -126,6 +158,8 @@ export type GameEvent =
   | {
       kind: "obasan";
       at: number;
+      /** 見た目・せりふの違い (0〜2)。毎回、ランダムに変わる */
+      variant: number;
       phase: "idle" | "ask" | "help" | "done";
       taps: number;
       elapsed: number;
@@ -134,12 +168,16 @@ export type GameEvent =
   | {
       kind: "crossing";
       at: number;
+      /** 見た目・せりふの違い (0〜2)。毎回、ランダムに変わる */
+      variant: number;
       phase: "idle" | "ask" | "wait" | "dash" | "blocked" | "done";
       elapsed: number;
     }
   | {
       kind: "dog";
       at: number;
+      /** 見た目・せりふの違い (0〜2)。毎回、ランダムに変わる */
+      variant: number;
       phase: "idle" | "chase" | "done";
       elapsed: number;
       /** 犬との距離 (px)。0 になると、追いつかれる */
@@ -148,24 +186,32 @@ export type GameEvent =
   | {
       kind: "vending";
       at: number;
+      /** 見た目・せりふの違い (0〜2)。毎回、ランダムに変わる */
+      variant: number;
       phase: "idle" | "ask" | "drink" | "done";
       elapsed: number;
     }
   | {
       kind: "friend";
       at: number;
+      /** 見た目・せりふの違い (0〜2)。毎回、ランダムに変わる */
+      variant: number;
       phase: "idle" | "ask" | "talk" | "done";
       elapsed: number;
     }
   | {
       kind: "bike";
       at: number;
+      /** 見た目・せりふの違い (0〜2)。毎回、ランダムに変わる */
+      variant: number;
       phase: "idle" | "warn" | "done";
       elapsed: number;
     }
   | {
       kind: "teacher";
       at: number;
+      /** 見た目・せりふの違い (0〜2)。毎回、ランダムに変わる */
+      variant: number;
       phase: "idle" | "greet" | "done";
       taps: number;
       elapsed: number;
@@ -173,7 +219,11 @@ export type GameEvent =
 
 export type EventKind = GameEvent["kind"];
 
+/** 障害物の種類: バッグ、ごみ箱、水たまり (雨の日)、猫。 */
+export type ObstacleKind = "bag" | "bin" | "puddle" | "cat";
+
 export type Obstacle = {
+  kind: ObstacleKind;
   /** 道のりの位置 (左端) */
   at: number;
   width: number;
@@ -205,6 +255,11 @@ export type GameState = {
   stamina: number;
   /** 息切れ中 (スタミナが空になってから、戻りきるまで) */
   exhausted: boolean;
+  /** 起きた時刻 (分)。時刻は、ここから進む */
+  startMinute: number;
+  weather: Weather;
+  /** 家から教室までの道のり (px) */
+  routeLength: number;
   obstacles: Obstacle[];
   events: GameEvent[];
   /** 進行中のできごと (あるあいだは、走らない) */
@@ -230,18 +285,33 @@ export type GameState = {
   };
 };
 
-function makeEvent(kind: EventKind, at: number): GameEvent {
+function makeEvent(kind: EventKind, at: number, variant = 0): GameEvent {
   switch (kind) {
     case "mother":
-      return { kind, at, phase: "idle", taps: 0, elapsed: 0 };
+      return { kind, at, variant, phase: "idle", taps: 0, elapsed: 0 };
     case "teacher":
-      return { kind, at, phase: "idle", taps: 0, elapsed: 0 };
+      return { kind, at, variant, phase: "idle", taps: 0, elapsed: 0 };
     case "obasan":
-      return { kind, at, phase: "idle", taps: 0, elapsed: 0, helped: false };
+      return {
+        kind,
+        at,
+        variant,
+        phase: "idle",
+        taps: 0,
+        elapsed: 0,
+        helped: false,
+      };
     case "dog":
-      return { kind, at, phase: "idle", elapsed: 0, gap: DOG_START_GAP };
+      return {
+        kind,
+        at,
+        variant,
+        phase: "idle",
+        elapsed: 0,
+        gap: DOG_START_GAP,
+      };
     default:
-      return { kind, at, phase: "idle", elapsed: 0 };
+      return { kind, at, variant, phase: "idle", elapsed: 0 };
   }
 }
 
@@ -281,13 +351,14 @@ function pickEvents(
   rand: () => number,
   recent: string[][],
   forced?: EventKind[],
+  maxCount = 3,
 ): GameEvent[] {
   let kinds: EventKind[];
   if (forced) {
     kinds = forced;
   } else {
     const r = rand();
-    const count = r < 0.15 ? 1 : r < 0.6 ? 2 : 3;
+    const count = Math.min(maxCount, r < 0.15 ? 1 : r < 0.6 ? 2 : 3);
     const pool = EVENT_KINDS.map((kind) => {
       let weight = EVENT_SLOTS[kind].weight;
       RECENT_PENALTY.forEach((penalty, index) => {
@@ -314,7 +385,7 @@ function pickEvents(
     for (let attempt = 0; attempt < 12; attempt++) {
       const at = slot.from + rand() * (slot.to - slot.from);
       if (events.every((item) => Math.abs(item.at - at) >= MIN_EVENT_GAP)) {
-        events.push(makeEvent(kind, at));
+        events.push(makeEvent(kind, at, Math.floor(rand() * 3)));
         break;
       }
     }
@@ -330,16 +401,35 @@ function pickEvents(
  */
 export function createGame(
   rand: () => number = Math.random,
-  options: { recent?: string[][]; kinds?: EventKind[] } = {},
+  options: {
+    recent?: string[][];
+    kinds?: EventKind[];
+    /** 条件を決める (テスト用。決めなければ、ランダム) */
+    conditions?: Partial<Conditions>;
+    /** 前回の条件。同じ天気・同じ起床時刻が続きにくくする */
+    previous?: { weather?: string; wake?: number };
+  } = {},
 ): GameState {
-  const events = pickEvents(rand, options.recent ?? [], options.kinds);
+  const conditions = pickConditions(rand, options.previous, options.conditions);
+  // 寝坊の日は、できごとを 2 つまでにする
+  const events = pickEvents(
+    rand,
+    options.recent ?? [],
+    options.kinds,
+    conditions.wake > WAKE_OPTIONS[1] ? 2 : 3,
+  );
+  const routeLength = conditions.routeLength;
 
   const minGap = RUN_SPEED * DASH_RATE * BOOST_RATE * (AIR_TIME + 0.12);
   const obstacles: Obstacle[] = [];
   let x = 1900;
-  while (x < ROUTE_LENGTH - 700) {
-    const width = 18 + Math.floor(rand() * 18);
-    const height = 22 + Math.floor(rand() * 26);
+  while (x < routeLength - 700) {
+    const kind = pickObstacleKind(rand, conditions.weather);
+    const size = OBSTACLE_SIZES[kind];
+    const width =
+      size.width[0] + Math.floor(rand() * (size.width[1] - size.width[0]));
+    const height =
+      size.height[0] + Math.floor(rand() * (size.height[1] - size.height[0]));
     const blocking = events.find(
       (event) => x + width > event.at - 500 && x < event.at + 400,
     );
@@ -347,7 +437,7 @@ export function createGame(
       x = blocking.at + 400;
       continue;
     }
-    obstacles.push({ at: x, width, height, hit: false });
+    obstacles.push({ kind, at: x, width, height, hit: false });
     x += width + PLAYER.width + minGap + rand() * 320;
   }
 
@@ -362,6 +452,9 @@ export function createGame(
     pace: "normal",
     stamina: STAMINA_MAX,
     exhausted: false,
+    startMinute: conditions.wake,
+    weather: conditions.weather,
+    routeLength,
     obstacles,
     events,
     active: null,
@@ -386,13 +479,97 @@ export function createGame(
   };
 }
 
+/** 障害物の大きさ (世界の px)。バッグが、いちばん高い。 */
+const OBSTACLE_SIZES: Record<
+  ObstacleKind,
+  { width: [number, number]; height: [number, number] }
+> = {
+  bag: { width: [18, 36], height: [22, 48] },
+  bin: { width: [20, 30], height: [28, 40] },
+  puddle: { width: [34, 52], height: [6, 8] },
+  cat: { width: [16, 22], height: [18, 26] },
+};
+
+/** 天気ごとの、障害物の種類の割合。雨の日は、水たまりが多い。 */
+const OBSTACLE_WEIGHTS: Record<Weather, Record<ObstacleKind, number>> = {
+  sunny: { bag: 0.55, bin: 0.25, puddle: 0, cat: 0.2 },
+  cloudy: { bag: 0.55, bin: 0.25, puddle: 0, cat: 0.2 },
+  rain: { bag: 0.35, bin: 0.15, puddle: 0.5, cat: 0 },
+};
+
+function pickObstacleKind(rand: () => number, weather: Weather): ObstacleKind {
+  const weights = OBSTACLE_WEIGHTS[weather];
+  let t = rand();
+  for (const kind of Object.keys(weights) as ObstacleKind[]) {
+    t -= weights[kind];
+    if (t < 0) return kind;
+  }
+  return "bag";
+}
+
+/**
+ * その日の条件 (起きた時刻・天気・道のりの長さ)。前回と同じ天気・同じ起床時刻は、選ばれにくい。
+ * 寝坊 (8:10) の雨の日は、厳しすぎるので、くもりにする。
+ */
+function pickConditions(
+  rand: () => number,
+  previous: { weather?: string; wake?: number } | undefined,
+  fixed: Partial<Conditions> | undefined,
+): Conditions {
+  const weighted = <T>(items: { value: T; weight: number }[]): T => {
+    const total = items.reduce((sum, item) => sum + item.weight, 0);
+    let t = rand() * total;
+    for (const item of items) {
+      t -= item.weight;
+      if (t < 0) return item.value;
+    }
+    return items[items.length - 1].value;
+  };
+  const wake =
+    fixed?.wake ??
+    weighted(
+      WAKE_OPTIONS.map((value, index) => ({
+        value,
+        weight:
+          [0.3, 0.4, 0.3][index] *
+          (previous?.wake === value ? SAME_AS_LAST_PENALTY : 1),
+      })),
+    );
+  let weather =
+    fixed?.weather ??
+    weighted(
+      (Object.keys(WEATHER_WEIGHTS) as Weather[]).map((value) => ({
+        value,
+        weight:
+          WEATHER_WEIGHTS[value] *
+          (previous?.weather === value ? SAME_AS_LAST_PENALTY : 1),
+      })),
+    );
+  if (
+    fixed?.weather === undefined &&
+    wake > WAKE_OPTIONS[1] &&
+    weather === "rain"
+  ) {
+    weather = "cloudy";
+  }
+  const routeLength =
+    fixed?.routeLength ??
+    Math.round(ROUTE_LENGTH * (1 + (rand() * 2 - 1) * ROUTE_VARIATION));
+  return { wake, weather, routeLength };
+}
+
 /** いまの時刻 (分。0:00 からの経過)。 */
 export function clockMinute(state: GameState): number {
-  return START_MINUTE + state.time;
+  return state.startMinute + state.time;
 }
 
 export function scoreOf(state: GameState): number {
   return Math.floor(state.distance / PX_PER_METER);
+}
+
+/** 転んだときに止まる秒数: 雨の日は、長い。 */
+export function stunSeconds(state: GameState): number {
+  return state.weather === "rain" ? RAIN_STUN_SECONDS : STUN_SECONDS;
 }
 
 export function startGame(state: GameState): void {
@@ -483,6 +660,7 @@ export function choose(state: GameState, option: 0 | 1): void {
       event.phase = "done";
       state.tags.ignored = true;
       state.obstacles.push({
+        kind: "bag",
         at: event.at,
         width: 36,
         height: 12,
@@ -529,6 +707,8 @@ export type EventView = {
   signal: boolean;
   /** 犬との距離の残り (0〜1)。犬に追われているときだけ */
   progress: number;
+  /** 見た目・せりふの違い (0〜2) */
+  variant: number;
 };
 
 export function eventView(state: GameState): EventView | null {
@@ -543,6 +723,7 @@ export function eventView(state: GameState): EventView | null {
       need: 0,
       signal: false,
       progress: Math.max(0, Math.min(1, dog.gap / DOG_START_GAP)),
+      variant: dog.variant,
     };
   }
   return {
@@ -564,6 +745,7 @@ export function eventView(state: GameState): EventView | null {
         event.elapsed <= DASH_CLOSE) ||
       (event.kind === "bike" && event.phase === "warn"),
     progress: 0,
+    variant: event.variant,
   };
 }
 
@@ -621,7 +803,7 @@ function stepEvent(state: GameState, event: GameEvent, dt: number): void {
       // よけられなかった: 転ぶ
       event.phase = "done";
       state.tags.bikeHit = true;
-      state.stun = STUN_SECONDS;
+      state.stun = stunSeconds(state);
       state.active = null;
     }
   } else if (event.kind === "crossing") {
@@ -694,7 +876,7 @@ export function stepGame(state: GameState, dt: number): void {
       RUN_SPEED * paceRate(state) * (state.boost > 0 ? BOOST_RATE : 1);
     moved = speed;
     if (state.boost > 0) state.boost = Math.max(0, state.boost - dt);
-    state.distance = Math.min(ROUTE_LENGTH, state.distance + speed * dt);
+    state.distance = Math.min(state.routeLength, state.distance + speed * dt);
 
     // できごとの始まり
     for (const event of state.events) {
@@ -728,7 +910,7 @@ export function stepGame(state: GameState, dt: number): void {
           right > dx + HIT_MARGIN && left < dx + obstacle.width - HIT_MARGIN;
         if (overlapX && state.y < obstacle.height - HIT_MARGIN) {
           obstacle.hit = true;
-          state.stun = STUN_SECONDS;
+          state.stun = stunSeconds(state);
           state.tags.falls += 1;
           break;
         }
@@ -744,7 +926,7 @@ export function stepGame(state: GameState, dt: number): void {
     if (dog.gap <= 0) {
       dog.phase = "done";
       state.chase = null;
-      state.stun = STUN_SECONDS;
+      state.stun = stunSeconds(state);
       state.tags.bitten = true;
     } else if (dog.elapsed >= DOG_SECONDS) {
       dog.phase = "done";
@@ -753,7 +935,7 @@ export function stepGame(state: GameState, dt: number): void {
     }
   }
 
-  if (state.distance >= ROUTE_LENGTH) {
+  if (state.distance >= state.routeLength) {
     state.status = "arrived";
   } else if (clockMinute(state) >= DEADLINE_MINUTE) {
     state.status = "late";
@@ -799,7 +981,7 @@ export function summarize(state: GameState): Summary {
     margin: arrived ? Math.max(0, Math.floor(DEADLINE_MINUTE - clock)) : 0,
     remaining: arrived
       ? 0
-      : Math.ceil((ROUTE_LENGTH - state.distance) / PX_PER_METER),
+      : Math.ceil((state.routeLength - state.distance) / PX_PER_METER),
     notes,
   };
 }
