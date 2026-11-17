@@ -9,12 +9,14 @@ import {
   eventView,
   MINI_GAME_NAME,
   press as pressInGame,
+  setPace,
   START_MINUTE,
   startGame,
   stepGame,
   summarize,
   type EventView,
   type GameState,
+  type Pace,
   type Summary,
 } from "@/lib/domain/mini-game";
 import { ART, CHARACTERS, drawScene } from "./mini-game-art";
@@ -103,12 +105,29 @@ export function MiniGame() {
   const overAt = useRef(0);
   const characterIndex = useRef(0);
   const viewKey = useRef("null");
+  // 押している向き (← ゆっくり / → ダッシュ)。キーと、画面のボタンの両方
+  const held = useRef({ left: false, right: false });
   const [character, setCharacter] = useState(0);
   const [phase, setPhase] = useState<Phase>("ready");
   const [view, setView] = useState<EventView | null>(null);
   const [bestMargin, setBestMargin] = useState(0);
   const [result, setResult] = useState<(Summary & { isBest: boolean }) | null>(
     null,
+  );
+
+  // 押している向きから、速さを決める (両方を押すと、ふつう)
+  const applyPace = useCallback(() => {
+    const { left, right } = held.current;
+    const pace: Pace = left === right ? "normal" : right ? "dash" : "slow";
+    setPace(game.current, pace);
+  }, []);
+
+  const hold = useCallback(
+    (side: "left" | "right", down: boolean) => {
+      held.current[side] = down;
+      applyPace();
+    },
+    [applyPace],
   );
 
   // 押された: 始める / ジャンプ・連打・合図 / 終わったあとは、やり直す
@@ -122,12 +141,13 @@ export function MiniGame() {
     } else if (performance.now() - overAt.current > RESTART_LOCK_MS) {
       game.current = createGame();
       startGame(game.current);
+      applyPace();
       setResult(null);
       setView(null);
       viewKey.current = "null";
       setPhase("playing");
     }
-  }, []);
+  }, [applyPace]);
 
   // 選ぶ (助ける / 通り過ぎる、待つ / 渡る)
   const pick = useCallback((option: 0 | 1) => {
@@ -195,6 +215,7 @@ export function MiniGame() {
     const onHidden = () => {
       if (document.hidden && game.current.status === "playing") {
         game.current = createGame();
+        held.current = { left: false, right: false };
         setPhase("ready");
         setView(null);
         viewKey.current = "null";
@@ -209,10 +230,14 @@ export function MiniGame() {
         if (!event.repeat) press();
       } else if (event.code === "ArrowLeft" || event.code === "ArrowRight") {
         event.preventDefault();
-        if (state.status === "playing") {
-          choose(state, event.code === "ArrowLeft" ? 0 : 1);
+        const side = event.code === "ArrowLeft" ? "left" : "right";
+        if (state.status !== "playing") {
+          if (!event.repeat) changeCharacter(side === "left" ? -1 : 1);
+        } else if (state.active !== null) {
+          // できごとの最中は、選ぶ (走らない)
+          if (!event.repeat) choose(state, side === "left" ? 0 : 1);
         } else {
-          changeCharacter(event.code === "ArrowLeft" ? -1 : 1);
+          hold(side, true);
         }
       } else if (event.code === "Digit1" || event.code === "Digit2") {
         if (state.status === "playing") {
@@ -220,13 +245,25 @@ export function MiniGame() {
         }
       }
     };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === "ArrowLeft") hold("left", false);
+      if (event.code === "ArrowRight") hold("right", false);
+    };
+    const onBlur = () => {
+      held.current = { left: false, right: false };
+      applyPace();
+    };
     window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
     return () => {
       cancelAnimationFrame(frame);
       document.removeEventListener("visibilitychange", onHidden);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
     };
-  }, [press, changeCharacter]);
+  }, [press, changeCharacter, hold, applyPace]);
 
   const over = phase === "arrived" || phase === "late";
   const message = view ? eventText(view) : null;
@@ -294,6 +331,34 @@ export function MiniGame() {
           </div>
         )}
 
+        {/* 速さのボタン (スマホ用。押している間だけ効く) */}
+        {phase === "playing" && !view && (
+          <>
+            {(
+              [
+                ["left", "◀ ゆっくり", "left-2"],
+                ["right", "ダッシュ ▶", "right-2"],
+              ] as const
+            ).map(([side, label, position]) => (
+              <button
+                key={side}
+                type="button"
+                aria-label={label}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  hold(side, true);
+                }}
+                onPointerUp={() => hold(side, false)}
+                onPointerLeave={() => hold(side, false)}
+                onPointerCancel={() => hold(side, false)}
+                className={`absolute bottom-2 ${position} touch-none select-none rounded-md bg-[#1f2a44]/70 px-3 py-2 text-xs font-bold text-white active:bg-[#4f5bd5]`}
+              >
+                {label}
+              </button>
+            ))}
+          </>
+        )}
+
         {/* 始める前と、終わったあと */}
         {phase !== "playing" && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -306,6 +371,9 @@ export function MiniGame() {
                   </p>
                   <p className="text-xs">
                     タップ / スペースで スタート(ジャンプも同じ)
+                  </p>
+                  <p className="text-xs opacity-80">
+                    → ダッシュ(スタミナを使う) / ← ゆっくり(スタミナが戻る)
                   </p>
                   {bestMargin > 0 && (
                     <p className="text-xs opacity-80">

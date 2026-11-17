@@ -41,11 +41,21 @@ export const PLAYER = { x: 72, width: 26, height: 38 } as const;
 
 const GRAVITY = 1900; // px/s²
 const JUMP_SPEED = 640; // px/s (上向き)
-const RUN_SPEED = 280; // px/s
-const BOOST_RATE = 1.3; // 飴をもらったあとの速さ
+export const RUN_SPEED = 280; // px/s
+export const BOOST_RATE = 1.3; // 飴をもらったあとの速さ
 const HIT_MARGIN = 5; // 当たり判定を、見た目より少し小さくする (px)
 /** 空中にいる時間 (秒): 障害物の間隔が、跳べる間隔より短くならないようにする。 */
-const AIR_TIME = (2 * JUMP_SPEED) / GRAVITY;
+export const AIR_TIME = (2 * JUMP_SPEED) / GRAVITY;
+
+// 速さの調整とスタミナ: → でダッシュ、← でゆっくり。スタミナが空になると、息切れして、とても遅くなる。
+export const DASH_RATE = 1.6; // ダッシュの速さ (ふだんの何倍か)
+export const SLOW_RATE = 0.6; // ゆっくりの速さ
+export const EXHAUSTED_RATE = 0.4; // 息切れ中の速さ
+export const STAMINA_MAX = 100;
+export const STAMINA_DRAIN = 20; // ダッシュ中に、1 秒に減る量
+export const RECOVER = 10; // ふだん (止まっているときも) に、1 秒に戻る量
+export const RECOVER_SLOW = 25; // ゆっくり歩いているとき
+export const RECOVER_AT = 30; // 息切れは、これまで戻ると終わる
 
 /** 1 メートル = これだけ進んだ距離 (px)。 */
 export const PX_PER_METER = 12;
@@ -129,6 +139,8 @@ export type Obstacle = {
   body?: boolean;
 };
 
+export type Pace = "slow" | "normal" | "dash";
+
 export type GameState = {
   status: "ready" | "playing" | "arrived" | "late";
   /** 進んだ道のり (px) */
@@ -142,6 +154,12 @@ export type GameState = {
   stun: number;
   /** 速い状態の残り (秒) */
   boost: number;
+  /** 押している速さ: ← ゆっくり / ふつう / → ダッシュ */
+  pace: Pace;
+  /** スタミナ (0〜100)。ダッシュで減り、休むと戻る */
+  stamina: number;
+  /** 息切れ中 (スタミナが空になってから、戻りきるまで) */
+  exhausted: boolean;
   obstacles: Obstacle[];
   events: GameEvent[];
   /** 進行中のできごと (あるあいだは、走らない) */
@@ -154,6 +172,7 @@ export type GameState = {
     dashed: boolean;
     blocked: boolean;
     falls: number;
+    exhausted: number;
   };
 };
 
@@ -172,7 +191,7 @@ function triggerAt(event: GameEvent): number {
 
 /**
  * 新しいゲーム。できごと (最大 3 つ) と障害物は、ここで先に決める (rand は 0 以上 1 未満の数を返す関数)。
- * 障害物どうしの間隔は、速い状態でも、跳び越えて着地できる長さより、必ず長い。
+ * 障害物どうしの間隔は、ダッシュと飴で、いちばん速いときでも、跳び越えて着地できる長さより、必ず長い。
  * できごとの前後には、障害物を置かない。家の中にも置かない。
  */
 export function createGame(rand: () => number = Math.random): GameState {
@@ -193,7 +212,7 @@ export function createGame(rand: () => number = Math.random): GameState {
   }
   events.sort((a, b) => a.at - b.at);
 
-  const minGap = RUN_SPEED * BOOST_RATE * (AIR_TIME + 0.18);
+  const minGap = RUN_SPEED * DASH_RATE * BOOST_RATE * (AIR_TIME + 0.12);
   const obstacles: Obstacle[] = [];
   let x = 1900;
   while (x < ROUTE_LENGTH - 700) {
@@ -218,6 +237,9 @@ export function createGame(rand: () => number = Math.random): GameState {
     time: 0,
     stun: 0,
     boost: 0,
+    pace: "normal",
+    stamina: STAMINA_MAX,
+    exhausted: false,
     obstacles,
     events,
     active: null,
@@ -229,6 +251,7 @@ export function createGame(rand: () => number = Math.random): GameState {
       dashed: false,
       blocked: false,
       falls: 0,
+      exhausted: 0,
     },
   };
 }
@@ -244,6 +267,34 @@ export function scoreOf(state: GameState): number {
 
 export function startGame(state: GameState): void {
   state.status = "playing";
+}
+
+/** 押している速さを決める (画面のキー・ボタンから呼ぶ)。 */
+export function setPace(state: GameState, pace: Pace): void {
+  state.pace = pace;
+}
+
+/** いまの速さの倍率: 息切れが最優先。ダッシュは、スタミナがあるときだけ。 */
+function paceRate(state: GameState): number {
+  if (state.exhausted) return EXHAUSTED_RATE;
+  if (state.pace === "dash") return DASH_RATE;
+  if (state.pace === "slow") return SLOW_RATE;
+  return 1;
+}
+
+function updateStamina(state: GameState, dt: number, dashing: boolean): void {
+  if (dashing) {
+    state.stamina -= STAMINA_DRAIN * dt;
+    if (state.stamina <= 0) {
+      state.stamina = 0;
+      state.exhausted = true;
+      state.tags.exhausted += 1;
+    }
+  } else {
+    const rate = state.pace === "slow" ? RECOVER_SLOW : RECOVER;
+    state.stamina = Math.min(STAMINA_MAX, state.stamina + rate * dt);
+    if (state.exhausted && state.stamina >= RECOVER_AT) state.exhausted = false;
+  }
 }
 
 export function jump(state: GameState): void {
@@ -361,7 +412,11 @@ function stepEvent(state: GameState, event: GameEvent, dt: number): void {
       event.phase = "done";
       event.helped = true;
       state.tags.helped = true;
-      if (event.taps >= OBASAN_TAPS) state.boost = BOOST_SECONDS;
+      if (event.taps >= OBASAN_TAPS) {
+        state.boost = BOOST_SECONDS;
+        state.stamina = STAMINA_MAX;
+        state.exhausted = false;
+      }
       state.active = null;
     }
   } else if (event.kind === "crossing") {
@@ -404,12 +459,21 @@ export function stepGame(state: GameState, dt: number): void {
     }
   }
 
+  // ダッシュできるのは、走っていて (できごとの最中でも転んでもいない)、息切れでないとき
+  const dashing =
+    state.active === null &&
+    state.stun <= 0 &&
+    !state.exhausted &&
+    state.pace === "dash";
+  updateStamina(state, dt, dashing);
+
   if (state.active !== null) {
     stepEvent(state, state.active, dt);
   } else if (state.stun > 0) {
     state.stun = Math.max(0, state.stun - dt);
   } else {
-    const speed = RUN_SPEED * (state.boost > 0 ? BOOST_RATE : 1);
+    const speed =
+      RUN_SPEED * paceRate(state) * (state.boost > 0 ? BOOST_RATE : 1);
     if (state.boost > 0) state.boost = Math.max(0, state.boost - dt);
     state.distance = Math.min(ROUTE_LENGTH, state.distance + speed * dt);
 
@@ -473,6 +537,7 @@ export function summarize(state: GameState): Summary {
   if (tags.dashed) notes.push("踏切を駆け抜けた!");
   if (tags.blocked) notes.push("踏切で電車に阻まれた");
   if (tags.falls > 0) notes.push(`転んだ ${tags.falls} 回`);
+  if (tags.exhausted > 0) notes.push(`息切れした ${tags.exhausted} 回`);
   return {
     outcome: arrived ? "arrived" : "late",
     arrival: clockText(clock),

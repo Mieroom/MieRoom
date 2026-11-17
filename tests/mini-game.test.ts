@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  AIR_TIME,
   BLOCKED_SECONDS,
+  BOOST_RATE,
   BOOST_SECONDS,
   canPlayMiniGame,
   choose,
@@ -8,9 +10,11 @@ import {
   clockText,
   createGame,
   CROSSING_WAIT,
+  DASH_RATE,
   DASH_CLOSE,
   DASH_OPEN,
   DEADLINE_MINUTE,
+  EXHAUSTED_RATE,
   eventView,
   isMiniGamePhrase,
   jump,
@@ -19,7 +23,13 @@ import {
   OBASAN_TAPS,
   opensMiniGame,
   press,
+  RECOVER_AT,
   ROUTE_LENGTH,
+  RUN_SPEED,
+  setPace,
+  SLOW_RATE,
+  STAMINA_DRAIN,
+  STAMINA_MAX,
   scoreOf,
   stageAt,
   START_MINUTE,
@@ -154,8 +164,10 @@ describe("ゲームの作り方 (できごと・障害物)", () => {
         }
         if (index > 0) {
           const gap = item.at - (list[index - 1].at + list[index - 1].width);
-          // 速い状態 (1.3 倍) で、空中にいる距離より長い
-          expect(gap).toBeGreaterThan(280 * 1.3 * ((2 * 640) / 1900));
+          // ダッシュ + 飴で、いちばん速いときでも、空中にいる距離より長い
+          expect(gap).toBeGreaterThan(
+            RUN_SPEED * DASH_RATE * BOOST_RATE * AIR_TIME,
+          );
         }
       }
     }
@@ -421,5 +433,107 @@ describe("結果", () => {
     expect(notes).toContain("おばさんを助けた(いい人)");
     expect(notes).toContain("踏切を駆け抜けた!");
     expect(notes).toContain("転んだ 2 回");
+  });
+});
+
+describe("速さの調整とスタミナ", () => {
+  function open() {
+    const state = newGame(fixed(0.99));
+    state.events = [];
+    clearObstacles(state);
+    return state;
+  }
+  function distanceIn(state: GameState, seconds: number) {
+    const before = state.distance;
+    run(state, seconds);
+    return state.distance - before;
+  }
+  it("ダッシュは速く、ゆっくりは遅い。ふつうとの比は、決めた倍率", () => {
+    const normal = distanceIn(open(), 1);
+    const dash = open();
+    setPace(dash, "dash");
+    const slow = open();
+    setPace(slow, "slow");
+    expect(distanceIn(dash, 1) / normal).toBeCloseTo(DASH_RATE, 1);
+    expect(distanceIn(slow, 1) / normal).toBeCloseTo(SLOW_RATE, 1);
+  });
+  it("ダッシュ中は、1 秒に決めた量だけ、スタミナが減る。ふつうに走ると、戻る", () => {
+    const state = open();
+    setPace(state, "dash");
+    run(state, 1);
+    expect(state.stamina).toBeCloseTo(STAMINA_MAX - STAMINA_DRAIN, 0);
+    setPace(state, "normal");
+    const low = state.stamina;
+    run(state, 1);
+    expect(state.stamina).toBeGreaterThan(low + 9);
+    // 上限を超えない
+    run(state, 30);
+    expect(state.stamina).toBe(STAMINA_MAX);
+  });
+  it("ゆっくり歩くと、ふつうより速くスタミナが戻る", () => {
+    const a = open();
+    a.stamina = 20;
+    run(a, 2);
+    const b = open();
+    b.stamina = 20;
+    setPace(b, "slow");
+    run(b, 2);
+    expect(b.stamina).toBeGreaterThan(a.stamina + 15);
+  });
+  it("スタミナを使い切ると息切れ: とても遅くなり、ダッシュを押しても速くならない", () => {
+    const state = open();
+    setPace(state, "dash");
+    run(state, STAMINA_MAX / STAMINA_DRAIN + 0.3);
+    expect(state.exhausted).toBe(true);
+    expect(state.tags.exhausted).toBe(1);
+    const normal = distanceIn(open(), 1);
+    // ダッシュを押したままでも、息切れの速さ
+    expect(distanceIn(state, 1) / normal).toBeLessThan(EXHAUSTED_RATE + 0.1);
+    expect(summarize(state).notes).toContain("息切れした 1 回");
+  });
+  it("息切れは、スタミナが 30 まで戻ると終わる。そのあと、ダッシュできる", () => {
+    const state = open();
+    setPace(state, "dash");
+    run(state, STAMINA_MAX / STAMINA_DRAIN + 0.3);
+    expect(state.exhausted).toBe(true);
+    setPace(state, "normal");
+    let guard = 0;
+    while (state.exhausted && guard++ < 400) stepGame(state, 0.05);
+    expect(state.exhausted).toBe(false);
+    expect(state.stamina).toBeGreaterThanOrEqual(RECOVER_AT);
+    setPace(state, "dash");
+    const normal = distanceIn(open(), 1);
+    expect(distanceIn(state, 1) / normal).toBeGreaterThan(DASH_RATE - 0.1);
+  });
+  it("転んでいる間とできごとの最中は、ダッシュしても減らず、休める", () => {
+    const state = open();
+    setPace(state, "dash");
+    state.stamina = 50;
+    state.stun = 2;
+    run(state, 1);
+    expect(state.stamina).toBeGreaterThan(50);
+    const event = newGame();
+    clearObstacles(event);
+    setPace(event, "dash");
+    event.stamina = 50;
+    event.distance = event.events[0].at;
+    stepGame(event, 0.05);
+    expect(event.active).not.toBeNull();
+    run(event, 1);
+    expect(event.stamina).toBeGreaterThan(50);
+  });
+  it("おばさんを助けた飴で、スタミナが全回復し、息切れも治る", () => {
+    const state = newGame();
+    clearObstacles(state);
+    state.events = state.events.filter((item) => item.kind === "obasan");
+    state.distance = state.events[0].at - 150;
+    state.stamina = 0;
+    state.exhausted = true;
+    stepGame(state, 0.05);
+    choose(state, 0);
+    for (let i = 0; i < OBASAN_TAPS; i++) press(state);
+    stepGame(state, 0.05);
+    expect(state.stamina).toBe(STAMINA_MAX);
+    expect(state.exhausted).toBe(false);
   });
 });

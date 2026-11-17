@@ -6,6 +6,7 @@ import {
   PLAYER,
   ROUTE_LENGTH,
   STAGE_STARTS,
+  STAMINA_MAX,
   WORLD,
   type GameEvent,
   type GameState,
@@ -694,7 +695,9 @@ function drawPlayer(
   });
   const moving =
     game.status === "playing" && game.active === null && game.stun <= 0;
-  const frame = moving ? Math.floor(game.time * 10) % 2 : 0;
+  const frame = moving
+    ? Math.floor(game.time * (game.exhausted ? 4 : 10)) % 2
+    : 0;
   const air = game.y > 0;
   // 時計の針: 4 方向に、順に回る
   if (character.clock) {
@@ -730,6 +733,19 @@ function drawPlayer(
     rect(ctx, C.dust, left - 2 - puff * 2, GROUND - 2, 1, 1);
     rect(ctx, C.dust, left - 5 - puff * 2, GROUND - 1, 1, 1);
   }
+  // ダッシュ: 後ろに、スピード線
+  if (moving && game.pace === "dash" && !game.exhausted && !air) {
+    const shift = Math.floor(game.time * 30) % 3;
+    for (let k = 0; k < 3; k++) {
+      rect(ctx, C.white, left - 10 - shift * 2, feet - 7 - k * 5, 7, 1);
+    }
+  }
+  // 息切れ: 汗が落ちる
+  if (game.exhausted && game.status === "playing") {
+    const drop = Math.floor(game.time * 5) % 3;
+    rect(ctx, "#8fd3ff", left + 12, bodyTop + 1 + drop * 2, 1, 2);
+    rect(ctx, "#8fd3ff", left - 1, bodyTop + 3 + ((drop + 1) % 3) * 2, 1, 2);
+  }
 }
 
 // ---------------------------------------------------------------- 1 コマ
@@ -759,6 +775,25 @@ function drawHud(ctx: CanvasRenderingContext2D, game: GameState) {
   // いまの時刻 (締め切りが近づくと、赤くなる)
   const late = remaining < 10;
   drawText(ctx, clockText(minute), 6, 2, late ? C.alert : C.hud, 2);
+  // スタミナ: ダッシュで減る。息切れのときは、赤く点滅する
+  const gaugeLeft = 46;
+  const gaugeWidth = 56;
+  rect(ctx, C.gold, gaugeLeft - 5, 3, 3, 1); // 稲妻
+  rect(ctx, C.gold, gaugeLeft - 6, 4, 3, 2);
+  rect(ctx, C.gold, gaugeLeft - 5, 6, 3, 1);
+  rect(ctx, C.gold, gaugeLeft - 4, 7, 2, 2);
+  rect(ctx, "#4a5680", gaugeLeft, 4, gaugeWidth, 5);
+  const level = Math.max(0, game.stamina) / STAMINA_MAX;
+  const gaugeColor = game.exhausted
+    ? Math.floor(game.time * 6) % 2 === 0
+      ? "#ff5a5a"
+      : "#8a2a2a"
+    : level > 0.5
+      ? "#6fd36f"
+      : level > 0.25
+        ? "#ffd84a"
+        : "#ff8a4a";
+  rect(ctx, gaugeColor, gaugeLeft, 4, Math.round(gaugeWidth * level), 5);
   // 道のり: 家から教室まで
   const barLeft = 112;
   const barWidth = 96;
