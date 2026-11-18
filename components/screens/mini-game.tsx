@@ -382,6 +382,8 @@ export function MiniGame({
   const runCount = useRef(0);
   // 終わったあとの画面: スコア → ランキングへの登録。登録した記録 (プレイごと) と、ランキングの読み直し
   const [endView, setEndView] = useState<"score" | "register">("score");
+  // 途中でリセットするか、聞いている間 (誤って押しても、すぐには消えない)
+  const [askReset, setAskReset] = useState(false);
   const [registered, setRegistered] = useState<{
     id: number;
     text: string;
@@ -440,11 +442,8 @@ export function MiniGame({
     }
   }, [begin]);
 
-  // 終わったあと、「もう一度」: タイトル画面 (モード・難易度・キャラを選べる、始める前の画面) へ戻る
-  const backToTitle = useCallback(() => {
-    if (game.current.status !== "arrived" && game.current.status !== "late") {
-      return;
-    }
+  // タイトル画面 (モード・難易度・キャラを選べる、始める前の画面) へ戻る。選んだ設定は、そのまま
+  const toTitle = useCallback(() => {
     game.current = makeGame();
     held.current = { left: false, right: false };
     setResult(null);
@@ -455,8 +454,25 @@ export function MiniGame({
     viewKey.current = "null";
     wakeKey.current = "null";
     stairsKey.current = "null";
+    setAskReset(false);
     setPhase("ready");
   }, [makeGame]);
+
+  // 終わったあと、「もう一度」: タイトル画面へ戻る
+  const backToTitle = useCallback(() => {
+    if (game.current.status !== "arrived" && game.current.status !== "late") {
+      return;
+    }
+    toTitle();
+  }, [toTitle]);
+
+  // 遊んでいる途中の「リセット」: 確かめてから、タイトル画面へ戻す (記録は送らない)
+  const resetGame = useCallback(() => {
+    if (game.current.status !== "waking" && game.current.status !== "playing") {
+      return;
+    }
+    toTitle();
+  }, [toTitle]);
 
   // 選ぶ (助ける / 通り過ぎる、待つ / 渡る)
   const pick = useCallback((option: 0 | 1) => {
@@ -1172,6 +1188,39 @@ export function MiniGame({
           </div>
         )}
       </div>
+      {(phase === "waking" || phase === "playing") && (
+        <div className="mx-auto flex w-full max-w-[960px] items-center justify-end gap-2 text-sm">
+          {askReset ? (
+            <>
+              <span role="status">
+                最初からやり直しますか?(記録は残りません)
+              </span>
+              <button
+                type="button"
+                onClick={resetGame}
+                className="rounded-md bg-[#1f2a44] px-3 py-1 font-bold text-white hover:opacity-80"
+              >
+                やり直す
+              </button>
+              <button
+                type="button"
+                onClick={() => setAskReset(false)}
+                className="rounded-md border border-line px-3 py-1 font-bold hover:bg-black/5"
+              >
+                続ける
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setAskReset(true)}
+              className="rounded-md border border-line px-3 py-1 font-bold hover:bg-black/5"
+            >
+              リセット
+            </button>
+          )}
+        </div>
+      )}
       {ranking !== "off" && (
         <MiniGameRanking
           api={rankingApi}
