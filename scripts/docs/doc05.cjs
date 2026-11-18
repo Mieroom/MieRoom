@@ -584,9 +584,7 @@ const body = [
   ...table(["ファイル", "件数", "合格", "内容"], unitRows, [24, 8, 8, 60], {
     size: 16,
   }),
-  p(
-    `合計 ${unit.total} 件、合格 ${unit.pass} 件。`,
-  ),
+  p(`合計 ${unit.total} 件、合格 ${unit.pass} 件。`),
 ];
 
 module.exports = (outDir) => L.build(meta, body, outDir);

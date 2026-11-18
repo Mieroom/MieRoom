@@ -143,12 +143,14 @@ export function compileStudentPattern(
  * An address whose part before "@" fits the student pattern is a student; every
  * other school address (it already passed the tenant and domain checks) is a
  * teacher. Admins are never made automatically: only INITIAL_ADMIN_EMAIL and
- * the registered admins.
+ * the registered admins. Registered teacher e-mails (for testing) are teachers
+ * even when they look like a student; an admin stays an admin.
  */
 export function determineRole(input: {
   email: string;
   initialAdminEmail: string;
   adminEmails: string[];
+  teacherEmails?: string[];
   studentEmailPattern: RegExp;
 }): Role {
   const email = normalizeEmail(input.email);
@@ -157,6 +159,10 @@ export function determineRole(input: {
   if (initialAdmin !== "" && email === initialAdmin) return "admin";
   if (input.adminEmails.some((item) => normalizeEmail(item) === email))
     return "admin";
+  if (
+    (input.teacherEmails ?? []).some((item) => normalizeEmail(item) === email)
+  )
+    return "teacher";
 
   const localPart = email.split("@")[0];
   return input.studentEmailPattern.test(localPart) ? "student" : "teacher";

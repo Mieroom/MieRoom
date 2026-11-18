@@ -212,6 +212,25 @@ describe("登録済みの生徒を選ぶ", () => {
   });
 });
 
+describe("先生として登録したメール (teacher_emails)", () => {
+  it("T-PRX-013 学生の形でも、登録していれば先生。選べない (ME521)。検索にも出ない", async () => {
+    const db = testDb();
+    await db.teacherEmail.create({
+      data: { email: `${USERS.otherStudent.id}@school.example` },
+    });
+    const response = await entry({ requesterId: USERS.otherStudent.id });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { issues: { code: string }[] };
+    expect(body.issues[0]).toMatchObject({ code: "ME521" });
+
+    const found = (await (
+      await search(post("/teacher/reservations/requesters", { q: "学生" }))
+    ).json()) as { people: { id: string }[] };
+    expect(found.people.map((person) => person.id)).toEqual([USERS.student.id]);
+    expect(await db.reservation.count()).toBe(0);
+  });
+});
+
 describe("依頼者の検索", () => {
   it("T-PRX-020 名前に含む生徒だけが、ID と名前で出る。先生・管理者は出ない。メールは出ない", async () => {
     const db = testDb();

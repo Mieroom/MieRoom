@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   normalizeRequesterName,
   REQUESTER_NAME_MAX,
@@ -13,6 +13,7 @@ vi.mock("server-only", () => ({}));
 const db = vi.hoisted(() => ({
   user: { findMany: vi.fn(), findUnique: vi.fn() },
   adminEmail: { findMany: vi.fn() },
+  teacherEmail: { findMany: vi.fn().mockResolvedValue([]) },
 }));
 vi.mock("@/lib/server/db", () => ({ getDb: () => db }));
 const env = vi.hoisted(() => ({
@@ -193,6 +194,43 @@ describe("生徒の検索 (searchRequesters)", () => {
     expect(await searchRequesters("山田", "t1")).toEqual([
       { id: "u1", name: "山田 太郎" },
     ]);
+  });
+});
+
+describe("先生として登録したメール (テスト用) は、生徒ではない", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    env.value = {
+      INITIAL_ADMIN_EMAIL: "boss@school.example",
+      STUDENT_EMAIL_PATTERN: /^(?:[0-9]{6})$/,
+    };
+    db.adminEmail.findMany.mockResolvedValue([]);
+    db.teacherEmail.findMany.mockResolvedValue([
+      { email: "234001@school.example" },
+    ]);
+  });
+
+  afterEach(() => {
+    db.teacherEmail.findMany.mockResolvedValue([]);
+  });
+
+  it("学生の形でも、登録していれば、検索に出ない", async () => {
+    db.user.findMany.mockResolvedValue([
+      { id: "u1", name: "山田 太郎", email: "234001@school.example" },
+      { id: "u5", name: "山田 花子", email: "234002@school.example" },
+    ]);
+    expect(await searchRequesters("山田", "t1")).toEqual([
+      { id: "u5", name: "山田 花子" },
+    ]);
+  });
+
+  it("学生の形でも、登録していれば、選べない", async () => {
+    db.user.findUnique.mockResolvedValue({
+      id: "u1",
+      name: "山田 太郎",
+      email: "234001@school.example",
+    });
+    expect(await findSelectableStudent("u1", "t1")).toBeNull();
   });
 });
 

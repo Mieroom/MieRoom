@@ -21,11 +21,15 @@ async function studentChecker(): Promise<(email: string) => boolean> {
   const adminEmails = (
     await db.adminEmail.findMany({ select: { email: true } })
   ).map((row) => row.email);
+  const teacherEmails = (
+    await db.teacherEmail.findMany({ select: { email: true } })
+  ).map((row) => row.email);
   return (email) =>
     determineRole({
       email,
       initialAdminEmail: env.INITIAL_ADMIN_EMAIL,
       adminEmails,
+      teacherEmails,
       studentEmailPattern: env.STUDENT_EMAIL_PATTERN,
     }) === "student";
 }

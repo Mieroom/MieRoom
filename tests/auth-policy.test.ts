@@ -408,6 +408,67 @@ describe("determineRole with a student e-mail pattern", () => {
   });
 });
 
+describe("determineRole with registered teacher e-mails (for testing)", () => {
+  const base = {
+    initialAdminEmail: "root@school.onmicrosoft.com",
+    adminEmails: ["boss@school.onmicrosoft.com"],
+    teacherEmails: ["123456@school.onmicrosoft.com", "Tester@School.test"],
+    studentEmailPattern: compileStudentPattern("[0-9]{6}") as RegExp,
+  };
+
+  it("a student-looking e-mail on the list is a teacher", () => {
+    expect(
+      determineRole({ ...base, email: "123456@school.onmicrosoft.com" }),
+    ).toBe("teacher");
+  });
+
+  it("compares case-insensitively", () => {
+    expect(determineRole({ ...base, email: "tester@school.test" })).toBe(
+      "teacher",
+    );
+  });
+
+  it("an e-mail that is not on the list keeps the rule by shape", () => {
+    expect(
+      determineRole({ ...base, email: "654321@school.onmicrosoft.com" }),
+    ).toBe("student");
+    expect(
+      determineRole({ ...base, email: "tanaka@school.onmicrosoft.com" }),
+    ).toBe("teacher");
+  });
+
+  it("an admin stays an admin even when listed as a teacher", () => {
+    expect(
+      determineRole({
+        ...base,
+        teacherEmails: [
+          "boss@school.onmicrosoft.com",
+          "root@school.onmicrosoft.com",
+        ],
+        email: "boss@school.onmicrosoft.com",
+      }),
+    ).toBe("admin");
+    expect(
+      determineRole({
+        ...base,
+        teacherEmails: ["root@school.onmicrosoft.com"],
+        email: "root@school.onmicrosoft.com",
+      }),
+    ).toBe("admin");
+  });
+
+  it("works without the list (the old callers)", () => {
+    expect(
+      determineRole({
+        initialAdminEmail: base.initialAdminEmail,
+        adminEmails: base.adminEmails,
+        studentEmailPattern: base.studentEmailPattern,
+        email: "123456@school.onmicrosoft.com",
+      }),
+    ).toBe("student");
+  });
+});
+
 describe("evaluateMicrosoftProfile with several allowed tenants", () => {
   const OTHER = "103afe75-0bcb-4e7d-8b68-d24025dfa82b";
   const STRANGER = "11111111-2222-3333-4444-555555555555";
