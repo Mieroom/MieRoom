@@ -585,7 +585,7 @@ const body = [
     size: 16,
   }),
   p(
-    `合計 ${unit.total} 件、合格 ${unit.pass} 件。提出の範囲に入れない調査用のテスト(${unit.hidden.tests} 件、${unit.hidden.files} ファイル)は、この数と一覧に含めていない(すべて合格)。`,
+    `合計 ${unit.total} 件、合格 ${unit.pass} 件。`,
   ),
 ];
 
