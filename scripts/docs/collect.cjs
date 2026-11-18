@@ -10,6 +10,9 @@ const ROOT = path.resolve(__dirname, "..", "..");
 const CACHE = path.join(ROOT, ".docs-cache");
 const skipTests = process.argv.includes("--skip-tests");
 
+// 提出の範囲に入れないもの(調査用の隠し要素)。ファイル・コミットは、件数・一覧に含めない。
+const { HIDDEN_PATH, HIDDEN_COMMIT } = require("./scope.cjs");
+
 fs.mkdirSync(CACHE, { recursive: true });
 const write = (name, value) =>
   fs.writeFileSync(path.join(CACHE, name), JSON.stringify(value, null, 1));
@@ -49,20 +52,35 @@ if (!fs.existsSync(rawFile))
     "単体テストの結果がありません。--skip-tests を外してください",
   );
 const raw = JSON.parse(fs.readFileSync(rawFile, "utf8"));
+const allFiles = raw.testResults.map((f) => ({
+  file: path.relative(ROOT, f.name).split(path.sep).join("/"),
+  n: f.assertionResults.length,
+  pass: f.assertionResults.filter((a) => a.status === "passed").length,
+  fail: f.assertionResults.filter((a) => a.status === "failed").length,
+}));
+const inScope = allFiles.filter((f) => !HIDDEN_PATH.test(f.file));
+const sum = (list, key) => list.reduce((total, f) => total + f[key], 0);
 const unit = {
-  total: raw.numTotalTests,
-  pass: raw.numPassedTests,
-  fail: raw.numFailedTests,
-  files: raw.testResults.map((f) => ({
-    file: path.relative(ROOT, f.name).split(path.sep).join("/"),
-    n: f.assertionResults.length,
-    pass: f.assertionResults.filter((a) => a.status === "passed").length,
-  })),
+  // 提出の範囲のテストだけ(範囲に入れないものは、hidden に数だけ持つ)
+  total: sum(inScope, "n"),
+  pass: sum(inScope, "pass"),
+  fail: sum(inScope, "fail"),
+  files: inScope.map(({ file, n, pass }) => ({ file, n, pass })),
+  hidden: {
+    files: allFiles.length - inScope.length,
+    tests: sum(allFiles, "n") - sum(inScope, "n"),
+    fail: sum(allFiles, "fail") - sum(inScope, "fail"),
+  },
 };
 write("unit.json", unit);
 console.log(
-  `単体: ${unit.pass} / ${unit.total}(${unit.files.length} ファイル)`,
+  `単体: ${unit.pass} / ${unit.total}(${unit.files.length} ファイル。範囲外 ${unit.hidden.tests} 件 ${unit.hidden.files} ファイル)`,
 );
+if (unit.hidden.fail > 0) {
+  throw new Error(
+    `範囲外のテストに失敗が ${unit.hidden.fail} 件あります。直してから作り直してください`,
+  );
+}
 
 // --- 2. メッセージ(lib/messages.ts から) ---
 {
@@ -83,7 +101,8 @@ const log = git("log", "--format=%an|%ad|%s", "--date=short")
   .map((line) => {
     const [a, d, ...s] = line.split("|");
     return { a, d, s: s.join("|") };
-  });
+  })
+  .filter((c) => !HIDDEN_COMMIT.test(c.s));
 const byAuthor = {};
 const byDay = {};
 for (const c of log) {
@@ -101,7 +120,11 @@ write("git.json", {
 console.log(`git: ${log.length} コミット`);
 
 // AI の共同作者(Co-Authored-By)の記載数
-const bodies = git("log", "--format=%B%x1e").split("\x1e");
+const bodies = git("log", "--format=%B%x1e")
+  .split("\x1e")
+  // 2 つめ以降は、先頭に改行が付く: 取ってから、件名(1 行め)で、範囲外のコミットを外す
+  .map((b) => b.replace(/^\n/, ""))
+  .filter((b) => b.trim() !== "" && !HIDDEN_COMMIT.test(b.split("\n")[0]));
 const trailers = { sonnet: 0, opus: 0, all: 0 };
 for (const b of bodies) {
   if (/Co-Authored-By: Claude/i.test(b)) trailers.all++;
@@ -114,7 +137,7 @@ const integ = [];
 const itDir = path.join(ROOT, "tests", "integration");
 for (const file of fs
   .readdirSync(itDir)
-  .filter((f) => f.endsWith(".it.ts"))
+  .filter((f) => f.endsWith(".it.ts") && !HIDDEN_PATH.test(f))
   .sort()) {
   const text = fs.readFileSync(path.join(itDir, file), "utf8");
   const re =
@@ -168,8 +191,17 @@ console.log(`結合テストの名前: ${integ.length}`);
 }
 
 // --- 6. 規模(コミット済みのファイルだけを数える) ---
+/** 表の数。範囲に入れない表(隠し要素のランキング)は、数えない。 */
+function schemaTables(schema) {
+  return (schema.match(/^model\s+\w+/gm) || []).filter(
+    (m) => !/MiniGameScore/.test(m),
+  ).length;
+}
 {
-  const files = git("ls-files").trim().split("\n");
+  const files = git("ls-files")
+    .trim()
+    .split("\n")
+    .filter((f) => !HIDDEN_PATH.test(f));
   const lines = (list) =>
     list.reduce((sum, f) => {
       const t = fs.readFileSync(path.join(ROOT, f), "utf8");
@@ -192,10 +224,10 @@ console.log(`結合テストの名前: ${integ.length}`);
     srcLines: lines(src),
     testLines: lines(tests),
     testFiles: tests.length,
-    tables: (schema.match(/^model\s+\w+/gm) || []).length,
+    tables: schemaTables(schema),
     trailers,
   });
   console.log(
-    `規模: ソース ${lines(src)} 行、テスト ${tests.length} ファイル ${lines(tests)} 行、表 ${(schema.match(/^model\s+\w+/gm) || []).length}`,
+    `規模: ソース ${lines(src)} 行、テスト ${tests.length} ファイル ${lines(tests)} 行、表 ${schemaTables(schema)}`,
   );
 }
