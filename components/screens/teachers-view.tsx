@@ -1,6 +1,3 @@
-import Form from "next/form";
-import { Button } from "@/components/ui/button";
-import { SearchField } from "@/components/ui/form";
 import { Icon } from "@/components/ui/icon";
 import {
   Badge,
@@ -10,6 +7,7 @@ import {
   Footnote,
   PageHeading,
 } from "@/components/ui/parts";
+import { TeacherSearch } from "./teacher-search";
 
 // 先生の位置の 3 つの状態 (外部設計書 R7-2).
 export type TeacherLocation =
@@ -69,29 +67,19 @@ export function TeachersView({
   teachers,
   query,
   basePath = "/teachers",
+  miniGame = false,
 }: {
   teachers: TeacherRow[];
   query: string;
   basePath?: string;
+  /** ミニゲームを遊べる役割か (合言葉の入口を有効にする) */
+  miniGame?: boolean;
 }) {
   return (
     <>
       <PageHeading title="先生一覧" />
       <FilterBar>
-        {/* The field takes the row and the button keeps its label on one line. */}
-        <Form action={basePath} className="flex w-full items-center gap-2">
-          <SearchField
-            key={query}
-            className="min-w-0 flex-1 sm:max-w-[310px]"
-            name="q"
-            defaultValue={query}
-            aria-label="名前で絞る"
-            placeholder="名前で絞る"
-          />
-          <Button type="submit" size="sm" className="h-[38px] shrink-0">
-            絞り込む
-          </Button>
-        </Form>
+        <TeacherSearch query={query} basePath={basePath} miniGame={miniGame} />
       </FilterBar>
       <div className="my-3 text-xs text-muted">{teachers.length}人を表示</div>
       {teachers.length === 0 ? (

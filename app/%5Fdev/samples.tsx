@@ -22,6 +22,14 @@ import type {
   LessonView,
   TimetableDay,
 } from "@/components/screens/lesson-parts";
+import {
+  canPlayMiniGame,
+  EVENT_KINDS,
+  WAKE_OPTIONS,
+  type Conditions,
+  type EventKind,
+} from "@/lib/domain/mini-game";
+import { MiniGameView } from "@/components/screens/mini-game-view";
 import { ReservationFormView } from "@/components/screens/reservation-form-view";
 import {
   MyReservationsView,
@@ -361,6 +369,36 @@ const EXPORT_ISSUES: ExportIssue[] = [
 ];
 
 /** The sample of a screen: "s03", or "s21/teachers" for a tab. */
+/** ?events=dog,bike のように、できごとを決めて遊ぶ (見本画面だけ)。 */
+function sampleKinds(value: string | undefined): EventKind[] | undefined {
+  if (!value) return undefined;
+  const kinds = value
+    .split(",")
+    .filter((item): item is EventKind =>
+      (EVENT_KINDS as string[]).includes(item),
+    );
+  return kinds.length > 0 ? kinds : undefined;
+}
+
+/** ?weather=rain&wake=490&route=1500 のように、天気・起床時刻 (分)・道のりの長さ (px) を決めて遊ぶ (見本画面だけ)。 */
+function sampleConditions(
+  weather: string | undefined,
+  wake: string | undefined,
+  route: string | undefined,
+): Partial<Conditions> | undefined {
+  const result: Partial<Conditions> = {};
+  if (weather === "sunny" || weather === "cloudy" || weather === "rain") {
+    result.weather = weather;
+  }
+  const minutes = Number(wake);
+  if (WAKE_OPTIONS.includes(minutes)) result.wake = minutes;
+  const length = Number(route);
+  if (Number.isFinite(length) && length >= 800 && length <= 20000) {
+    result.routeLength = Math.round(length);
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 export function sampleFor(
   path: string[],
   params: SampleParams,
@@ -548,6 +586,7 @@ export function sampleFor(
             teachers={rows.filter((row) => row.name.includes(query))}
             query={query}
             basePath={base}
+            miniGame={canPlayMiniGame(role)}
           />
         ),
       };
@@ -957,6 +996,23 @@ export function sampleFor(
                 createdAt: "2026-11-13T02:00:00.000Z",
               },
             ]}
+          />
+        ),
+      };
+    case "play":
+      // 学生だけの隠し要素 (本物は /play。入り口は、先生一覧の「名前で絞る」)
+      return {
+        menuId: "s05",
+        element: (
+          <MiniGameView
+            backHref={`/_dev/s05?role=${role}`}
+            ranking="demo"
+            kinds={sampleKinds(one(params.events))}
+            conditions={sampleConditions(
+              one(params.weather),
+              one(params.wake),
+              one(params.route),
+            )}
           />
         ),
       };

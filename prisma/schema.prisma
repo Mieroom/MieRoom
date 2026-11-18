@@ -16,18 +16,19 @@ datasource db {
 // ---- Better Auth ------------------------------------------------------
 
 model User {
-  id            String        @id
-  name          String
-  email         String        @unique
-  emailVerified Boolean       @default(false)
-  image         String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @default(now()) @updatedAt
-  sessions      Session[]
-  accounts      Account[]
-  reservations  Reservation[] @relation("Applicant")
-  handled       Reservation[] @relation("Handler")
-  roomBlocks    RoomBlock[]
+  id             String          @id
+  name           String
+  email          String          @unique
+  emailVerified  Boolean         @default(false)
+  image          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @default(now()) @updatedAt
+  sessions       Session[]
+  accounts       Account[]
+  reservations   Reservation[]   @relation("Applicant")
+  handled        Reservation[]   @relation("Handler")
+  roomBlocks     RoomBlock[]
+  miniGameScores MiniGameScore[]
 
   @@map("users")
 }
@@ -474,4 +475,23 @@ model Monitor {
   createdAt  DateTime @default(now())
 
   @@map("monitors")
+}
+
+// E19 ミニゲームのランキング (隠し要素。外部設計書にはない)。1 人・モード・難易度ごとに、ベストの 1 行だけ。
+// mode は normal (通常。value = 点数、高いほど良い) か timeattack (value = 0.1 秒の数、低いほど良い)。
+// difficulty は easy / normal / hard。画面に出すのはニックネームだけ。ユーザーを消すと、記録も一緒に消える。
+model MiniGameScore {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mode       String   @db.VarChar(10)
+  difficulty String   @db.VarChar(10)
+  nickname   String   @db.VarChar(12)
+  value      Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@unique([userId, mode, difficulty])
+  @@index([mode, difficulty, value])
+  @@map("mini_game_scores")
 }
