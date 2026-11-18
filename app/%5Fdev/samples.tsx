@@ -61,7 +61,6 @@ import {
   parseWeekStart,
   schoolMinutes,
   schoolToday,
-  weekDates,
   weekdayOf,
 } from "@/lib/domain/school-date";
 import { one } from "@/lib/url";
@@ -424,19 +423,10 @@ export function sampleFor(
     case "s03": {
       const requestedDate = one(params.date);
       const date = isSchoolDate(requestedDate) ? requestedDate : today;
-      const view = one(params.view);
-      const mode: TimetableMode =
-        view === "week" || view === "month" ? view : "day";
+      const mode: TimetableMode = one(params.view) === "day" ? "day" : "month";
       const weekStart = parseWeekStart(one(params.start));
-      // The samples have lessons on weekdays only, so the week shows 月〜金 either way.
       const dates =
-        mode === "day"
-          ? [date]
-          : mode === "week"
-            ? weekDates(date, weekStart).filter(
-                (day) => weekdayOf(day) % 6 !== 0,
-              )
-            : monthWeeks(monthOf(date), weekStart).flat();
+        mode === "day" ? [date] : monthWeeks(monthOf(date), weekStart).flat();
       const teacher = TEACHERS.find((item) => item.id === one(params.teacher));
       return {
         menuId: "s03",

@@ -6,9 +6,8 @@ const SCREENS: { title: string; items: [string, string][] }[] = [
     items: [
       ["s01", "S01 ログイン"],
       ["s02", "S02 ホーム"],
-      ["s03", "S03 時間割(今日)"],
-      ["s03?view=week", "S03 時間割(今週)"],
-      ["s03?view=month", "S03 時間割(月)"],
+      ["s03", "S03 時間割(月)"],
+      ["s03?view=day", "S03 時間割(1日)"],
       ["s04", "S04 空き教室(カード)"],
       ["s04?layout=table&all=1", "S04 空き教室(時限表)"],
       ["s05", "S05 先生一覧"],
