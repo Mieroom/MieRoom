@@ -349,7 +349,7 @@ const body = [
       [
         "依存パッケージの脆弱性",
         "一部あり",
-        "`npm audit` で 5 件(high)。すべて、テスト用の道具(vitest → vite → picomatch の ReDoS)の連鎖で、アプリの実行に使う部品(Next.js、React、Better Auth、Prisma など)には、指摘がない。修正版は、vitest の破壊的な更新を伴うため、保留(04 の K-20)",
+        "`npm audit` で 5 件(high)。すべて、テスト用の道具(vitest → vite → picomatch の ReDoS)の連鎖で、アプリの実行に使う部品(Next.js、React、Better Auth、Prisma など)は、実行時には使わない。picomatch の最新版が、いま入っている版で、修正版がないため、例外として記録(04 の K-20)",
       ],
       [
         "CI(GitHub Actions)",
