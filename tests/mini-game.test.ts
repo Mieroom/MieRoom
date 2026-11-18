@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   AIR_TIME,
-  BIKE_WINDOW,
+  BIKE_LEAD,
+  BIKE_SPEED,
   BLOCKED_SECONDS,
   BOOST_RATE,
   BOOST_SECONDS,
@@ -71,7 +72,8 @@ import {
   STAIR_TEACHER_STOP,
   stairsView,
   TOP_FLOOR,
-  WALKER_WINDOW,
+  WALKER_SPEED,
+  WALKER_START_STEP,
   type Difficulty,
   WAKE_CELLS,
   type WakeZone,
@@ -767,28 +769,95 @@ describe("できごと: 友達に話しかけられる", () => {
   });
 });
 
-describe("できごと: 自転車の飛び出し", () => {
-  function atBike() {
+describe("できごと: 走ってくる自転車 (動く障害物)", () => {
+  /** 自転車が走り出す手前から始める。jumpAtDx: 自転車がこの近さ (px) になったら跳ぶ (null なら、跳ばない)。 */
+  function ride(jumpAtDx: number | null): GameState {
     const state = onlyGame("bike");
-    state.distance = state.events[0].at - 150;
-    stepGame(state, 0.05);
+    state.distance = state.events[0].at - BIKE_LEAD - 1;
+    let jumped = false;
+    for (let i = 0; i < 1500; i++) {
+      const bike = state.obstacles.find((item) => item.kind === "bike");
+      if (
+        jumpAtDx !== null &&
+        bike !== undefined &&
+        !jumped &&
+        bike.at - state.distance < jumpAtDx
+      ) {
+        jump(state);
+        jumped = true;
+      }
+      stepGame(state, 1 / 120);
+      if (bike && (bike.hit || bike.passed)) break;
+    }
     return state;
   }
-  it("止まって、すぐ合図が出る。タップすると、よけられる", () => {
-    const state = atBike();
-    expect(eventView(state)).toMatchObject({ kind: "bike", signal: true });
-    press(state);
+
+  it("近づくまでは、待っている。近づくと、走り出す (止まらずに走り続け、文字や合図は出ない)", () => {
+    const state = onlyGame("bike");
+    const bike = state.events[0];
+    state.distance = bike.at - BIKE_LEAD - 60;
+    run(state, 0.1);
+    expect(bike.phase).toBe("idle");
+    expect(state.obstacles.some((item) => item.kind === "bike")).toBe(false);
+    state.distance = bike.at - BIKE_LEAD - 1;
+    stepGame(state, 0.05);
+    expect(bike.phase).toBe("ride");
     expect(state.active).toBeNull();
-    expect(state.tags.bikeDodged).toBe(true);
-    expect(state.stun).toBe(0);
+    expect(eventView(state)).toBeNull();
+    const rider = state.obstacles.find((item) => item.kind === "bike");
+    expect(rider).toMatchObject({ speed: BIKE_SPEED, hit: false });
+    const before = state.distance;
+    run(state, 0.2);
+    expect(state.distance).toBeGreaterThan(before); // 走りは、止まらない
   });
-  it("0.8 秒のあいだにタップしないと、転ぶ", () => {
-    const state = atBike();
-    run(state, BIKE_WINDOW + 0.2);
-    expect(state.active).toBeNull();
+  it("走ってくる: こちらが止まっていても、左へ動く", () => {
+    const state = onlyGame("bike");
+    state.distance = state.events[0].at - BIKE_LEAD - 1;
+    stepGame(state, 0.05);
+    const rider = state.obstacles.find((item) => item.kind === "bike")!;
+    state.stun = 5;
+    const at = rider.at;
+    const t0 = state.time;
+    run(state, 0.5);
+    expect(rider.at).toBeCloseTo(at - BIKE_SPEED * (state.time - t0), 0);
+  });
+  it("ちょうどよいときに跳べば、よけられる。ぶつからず、転ばない", () => {
+    const state = ride(170);
+    expect(state.tags.bikeDodged).toBe(true);
+    expect(state.tags.bikeHit).toBe(false);
+    expect(state.tags.falls).toBe(0);
+    expect(state.stun).toBe(0);
+    expect(state.events[0].phase).toBe("done");
+    expect(summarize(state).notes).toContain("自転車をよけた!");
+  });
+  it("跳ばなければ、ぶつかって転ぶ", () => {
+    const state = ride(null);
     expect(state.tags.bikeHit).toBe(true);
+    expect(state.tags.bikeDodged).toBe(false);
+    expect(state.tags.falls).toBe(1);
     expect(state.stun).toBeGreaterThan(0);
     expect(summarize(state).notes).toContain("自転車にぶつかって転んだ");
+  });
+  it("跳ぶのが早すぎても、遅すぎても、ぶつかる (タイミングを見て、跳ぶ)", () => {
+    expect(ride(520).tags.bikeHit).toBe(true); // 早すぎる: 着地してから、来る
+    expect(ride(30).tags.bikeHit).toBe(true); // 遅すぎる: 跳ぶ前に、ぶつかる
+    // 跳べる幅: 0.05〜0.6 秒ほど前に跳べば、よけられる (近さで、およそ 45〜320 px)
+    for (const dx of [60, 120, 200, 280]) {
+      expect(ride(dx).tags.bikeDodged, String(dx)).toBe(true);
+    }
+  });
+  it("自転車は、ふつうの障害物には混ざらない (できごとのときだけ、走ってくる)", () => {
+    for (let seed = 0; seed < 200; seed++) {
+      let a = seed + 1;
+      const rand = () => {
+        a = (a + 0x6d2b79f5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      const state = createGame(rand, { kinds: [], conditions: TODAY });
+      expect(state.obstacles.some((item) => item.kind === "bike")).toBe(false);
+    }
   });
 });
 
@@ -1448,33 +1517,101 @@ describe("校舎の階段 (むずかしい)", () => {
     climb(state, "left");
     expect(state.stairs?.steps).toBe(STAIR_STEPS * 5);
   });
-  it("階段は、跳べない", () => {
+  it("階段でも跳べる。跳んでいる間は、足を出せない。先生や友達のできごとの最中は、跳べない", () => {
     const state = onStairs();
     jump(state);
-    expect(state.vy).toBe(0);
-    press(state);
-    expect(state.y).toBe(0);
-  });
-  it("降りてくる人: タップでよける。よけられないと、ぶつかって転ぶ", () => {
-    const state = onStairs(["walker", "walker"]);
-    climbSteps(state, STAIR_EVENT_STEP);
-    expect(stairsView(state)).toMatchObject({ kind: "walker", phase: "warn" });
-    // 起きている間は、上れない
+    expect(state.vy).toBeGreaterThan(0);
+    stepGame(state, 0.05);
+    expect(state.y).toBeGreaterThan(0);
     const steps = state.stairs!.steps;
     climb(state, other(state));
-    expect(state.stairs?.steps).toBe(steps);
-    press(state);
-    expect(state.stairs?.event).toBeNull();
+    expect(state.stairs!.steps).toBe(steps); // 空中では、上れない
+    run(state, 1);
+    expect(state.y).toBe(0);
+    climb(state, other(state));
+    expect(state.stairs!.steps).toBe(steps + 1);
+
+    const talking = onStairs(["teacher"]);
+    climbSteps(talking, STAIR_EVENT_STEP);
+    expect(talking.stairs?.event?.kind).toBe("teacher");
+    jump(talking);
+    expect(talking.vy).toBe(0);
+  });
+
+  /**
+   * 降りてくる人が近づくまで、交互に上る (1 秒に 5 段)。近づいたら上るのをやめて待ち、すれ違うまで見る。
+   * jumpGap: 人との近さ (段) がこれより近くなったら跳ぶ (null なら、跳ばない)。
+   */
+  function meetWalker(state: GameState, jumpGap: number | null) {
+    const walker = state.stairs!.plan[0];
+    let sinceClimb = 1;
+    let jumped = false;
+    for (let i = 0; i < 3000 && walker.phase !== "done"; i++) {
+      const gap = walker.pos - (state.stairs!.steps + state.stairs!.partial);
+      if (
+        jumpGap !== null &&
+        !jumped &&
+        walker.phase === "walk" &&
+        gap < jumpGap
+      ) {
+        jump(state);
+        jumped = true;
+      }
+      sinceClimb += 0.02;
+      // 人が近づいたら (3 段より近く)、上るのをやめて、見て待つ (1 段ずつしか進めないので、近づく速さが飛ぶ)
+      if (sinceClimb >= 0.2 && (walker.phase !== "walk" || gap > 3)) {
+        climb(state, other(state));
+        sinceClimb = 0;
+      }
+      stepGame(state, 0.02);
+    }
+  }
+
+  it("降りてくる人: 階段の上で待っていて、その階段に入ると、おりてくる。上る足は、止まらない", () => {
+    const state = onStairs(["walker"]);
+    const walker = state.stairs!.plan[0];
+    expect(walker.phase).toBe("idle");
+    expect(stairsView(state)).toMatchObject({ kind: null }); // 文は、出ない
+    // 階段に入っただけでは、まだ待っている。WALKER_START_STEP 段上ると、おりてくる
+    climbSteps(state, WALKER_START_STEP);
+    expect(walker.phase).toBe("walk");
+    expect(walker.pos).toBe(STAIR_STEPS); // 階段の上の踊り場から
+    const steps = state.stairs!.steps;
+    climb(state, other(state));
+    expect(state.stairs!.steps).toBe(steps + 1); // 上れる (止まらない)
+    expect(stairsView(state)).toMatchObject({ kind: null });
+    // おりてくる人は、時間とともに、下の段へ
+    const pos = walker.pos;
+    run(state, 0.5);
+    expect(walker.pos).toBeCloseTo(pos - WALKER_SPEED * 0.5, 0);
+  });
+  it("降りてくる人: ちょうどよいときに跳べば、よけられる。ぶつからず、転ばない", () => {
+    const state = onStairs(["walker"]);
+    meetWalker(state, 1);
+    expect(state.stairs!.plan[0].phase).toBe("done");
     expect(state.tags.stairDodged).toBe(1);
+    expect(state.tags.stairHit).toBe(0);
     expect(state.stun).toBe(0);
-    // 次の階段: よけない
-    climbSteps(state, STAIR_STEPS);
-    expect(state.stairs?.event?.kind).toBe("walker");
-    run(state, WALKER_WINDOW + 0.1);
-    expect(state.stairs?.event).toBeNull();
+  });
+  it("降りてくる人: 跳ばなければ、ぶつかって転ぶ (1 回だけ数える)", () => {
+    const state = onStairs(["walker"]);
+    meetWalker(state, null);
     expect(state.tags.stairHit).toBe(1);
-    expect(state.stun).toBeGreaterThan(0);
-    expect(state.stun).toBeLessThanOrEqual(STUN_SECONDS);
+    expect(state.tags.stairDodged).toBe(0);
+    expect(summarize(state).notes).toContain("階段で人とぶつかった");
+  });
+  it("降りてくる人: 跳ぶのが早すぎても、遅すぎても、ぶつかる", () => {
+    const early = onStairs(["walker"]);
+    meetWalker(early, 11);
+    expect(early.tags.stairHit).toBe(1);
+    const late = onStairs(["walker"]);
+    meetWalker(late, 0);
+    expect(late.tags.stairHit).toBe(1);
+    for (const gap of [0.4, 1, 1.6]) {
+      const state = onStairs(["walker"]);
+      meetWalker(state, gap);
+      expect(state.tags.stairDodged, String(gap)).toBe(1);
+    }
   });
   it("先生に止められる: 動かずに待てば済む。動くと怒られて、止まる", () => {
     const wait = onStairs(["teacher"]);
@@ -1556,10 +1693,14 @@ describe("校舎の階段 (むずかしい)", () => {
   });
   it("階段のできごとと、つまずきは、結果の一言に出る", () => {
     const state = onStairs(["walker", "teacher"]);
-    climbSteps(state, STAIR_EVENT_STEP);
-    press(state);
-    climbSteps(state, STAIR_STEPS);
-    climb(state, other(state)); // 先生の前で、動いてしまう
+    meetWalker(state, 1); // 1 つめの階段: 人を、跳んでよける
+    // 2 つめの階段: 先生の前まで上って、動いてしまう
+    while (state.stairs!.steps < STAIR_STEPS + STAIR_EVENT_STEP) {
+      climb(state, other(state));
+      stepGame(state, 0.2);
+    }
+    expect(state.stairs?.event?.kind).toBe("teacher");
+    climb(state, other(state));
     run(state, 3);
     expect(summarize(state).notes).toContain("階段で人をよけた");
     expect(summarize(state).notes).toContain("階段で先生に怒られた");

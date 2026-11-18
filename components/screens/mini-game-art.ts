@@ -1,7 +1,6 @@
 import {
   clockMinute,
   clockText,
-  BIKE_WINDOW,
   CROSSING_WAIT,
   DEADLINE_MINUTE,
   DIFFICULTIES,
@@ -14,7 +13,6 @@ import {
   PLAYER,
   STAGE_STARTS,
   STAMINA_MAX,
-  WALKER_WINDOW,
   WORLD,
   type GameEvent,
   type GameState,
@@ -766,7 +764,14 @@ function drawObstacle(
   if (obstacle.kind === "bin") drawBin(ctx, x, obstacle.width, obstacle.height);
   else if (obstacle.kind === "puddle") drawPuddle(ctx, x, obstacle.width);
   else if (obstacle.kind === "cat") drawCat(ctx, x, obstacle.height, time);
-  else drawBag(ctx, x, obstacle.width, obstacle.height);
+  else if (obstacle.kind === "bike") {
+    // 左へ走ってくる (左向き)
+    ctx.save();
+    ctx.translate(x + 16, 0);
+    ctx.scale(-1, 1);
+    drawBike(ctx, 0, obstacle.variant ?? 0);
+    ctx.restore();
+  } else drawBag(ctx, x, obstacle.width, obstacle.height);
 }
 
 function drawBag(
@@ -1213,10 +1218,9 @@ function drawStairActors(ctx: CanvasRenderingContext2D, game: GameState) {
     if (event.kind === "walker") {
       if (event.phase === "idle") {
         person(n, friendColor(event.variant), "none", true);
-      } else if (event.phase === "warn") {
-        // 上の踊り場から、おりてくる
-        const progress = Math.min(1, event.elapsed / WALKER_WINDOW);
-        person(n - progress * 4.5, friendColor(event.variant), "none", false);
+      } else if (event.phase === "walk") {
+        // 上の踊り場から、おりてくる (いる段は、ゲームの中の位置。ぶつかる所まで、見えている)
+        person(event.pos, friendColor(event.variant), "none", false);
       }
     } else if (event.kind === "teacher") {
       if (gone) return;
@@ -1426,16 +1430,16 @@ export function drawScene(
       );
     } else if (event.kind === "bike" && event.phase === "idle") {
       // 道の先の脇道で、待っている (近づくと、「!」が出る)
+      // (走り出したあとは、障害物として描く)
       const x = edge(event.at);
       if (x < ART.width + 4) {
-        drawBike(ctx, x, event.variant);
+        ctx.save();
+        ctx.translate(x + 16, 0);
+        ctx.scale(-1, 1);
+        drawBike(ctx, 0, event.variant);
+        ctx.restore();
         if (x < 200) drawAlert(ctx, x + 5, GROUND - 28, game.time);
       }
-    } else if (event.kind === "bike" && event.phase === "warn") {
-      // 待っていた所から、キャラの目の前まで飛び出してくる
-      const progress = Math.min(1, event.elapsed / BIKE_WINDOW);
-      const start = edge(event.at);
-      drawBike(ctx, Math.round(start - progress * (start - 50)), event.variant);
     } else if (event.kind === "dog" && event.phase === "idle") {
       // 道の先に、犬がいる (こちらを向いている。近づくと、「!」が出る)
       const x = edge(event.at);

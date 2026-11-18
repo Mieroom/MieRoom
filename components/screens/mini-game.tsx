@@ -160,7 +160,6 @@ const TITLES: Record<string, string[]> = {
   dog: ["犬が追ってくる!!", "野良犬だ!!", "大きな犬が吠えている!!"],
   vending: ["自販機がある!", "冷たい飲み物の自販機!", "自販機を見つけた!"],
   friend: ["友達に会った!", "クラスメイトに呼ばれた!", "友達が手を振っている!"],
-  bike: ["危ない!!", "自転車が来た!!", "ぶつかる!!"],
   teacher: [
     "先生が呼び止める!",
     "先生が校門に立っている!",
@@ -182,9 +181,6 @@ function eventText(view: EventView): { title: string; hint: string } {
     return view.phase === "ask"
       ? { title: title("friend"), hint: "立ち話する?(3 秒)" }
       : { title: "おしゃべり中…", hint: "おにぎりをもらう" };
-  }
-  if (view.kind === "bike") {
-    return { title: title("bike"), hint: "タップ / スペース!" };
   }
   if (view.kind === "teacher") {
     return { title: title("teacher"), hint: "連打であいさつ!" };
@@ -213,7 +209,6 @@ function eventText(view: EventView): { title: string; hint: string } {
 
 /** 階段のできごとの文 (variant で、毎回、せりふが変わる)。 */
 const STAIR_TITLES: Record<string, string[]> = {
-  walker: ["人がおりてくる!!", "ぶつかる!!", "走っておりてくる!!"],
   teacher: ["走るな!!", "先生が見ている!", "廊下は走らない!"],
   friend: ["友達に会った!", "クラスメイトが手を振っている!", "友達に呼ばれた!"],
 };
@@ -223,14 +218,13 @@ function stairText(view: StairsView): { title: string; hint: string } | null {
     return view.intro
       ? {
           title: "階段だ! 教室は 6 階!",
-          hint: "← → を交互に押して上る(同じ側を続けるとつまずく)",
+          hint: "← → を交互に押して上る(同じ側を続けるとつまずく)。スペース / タップで跳ぶ",
         }
       : null;
   }
+  // 降りてくる人は、文を出さない (動く障害物: 見て、跳んでよける)
+  if (view.kind === "walker") return null;
   const title = STAIR_TITLES[view.kind][view.variant % 3];
-  if (view.kind === "walker") {
-    return { title, hint: "タップ / スペースでよける!" };
-  }
   if (view.kind === "teacher") {
     return { title, hint: "止まれ!(動くと怒られる)" };
   }
@@ -775,9 +769,7 @@ export function MiniGame({
             <div className="flex min-w-[15rem] flex-col items-center gap-1 rounded-lg bg-[#1f2a44]/85 px-5 py-2 text-center text-white">
               <p
                 className={`text-base font-bold tracking-widest ${
-                  stairs.kind === "walker" || stairs.kind === "teacher"
-                    ? "text-[#ffe066]"
-                    : ""
+                  stairs.kind === "teacher" ? "text-[#ffe066]" : ""
                 }`}
               >
                 {stairMessage.title}

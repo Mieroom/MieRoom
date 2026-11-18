@@ -329,8 +329,12 @@ export function stairActorStep(
 export const STAIR_COST = 2.2;
 /** 同じ側を続けて押す (つまずく) と、止まる秒数。 */
 export const STAIR_STUMBLE = 0.7;
-/** 階段で人がおりてくる: よけられる秒数。 */
-export const WALKER_WINDOW = 1;
+/** 階段で人がおりてくる速さ (1 秒に何段)。上る速さと合わせて、ぶつかるまでの時間が決まる。 */
+export const WALKER_SPEED = 3;
+/** その階段の、この段まで上ると、上の踊り場で待っていた人が、おりてき始める。 */
+export const WALKER_START_STEP = 1;
+/** おりてくる人を跳び越えた、と言える足元の高さ (世界の px)。 */
+export const WALKER_CLEAR = 30;
 /** 階段で先生に止められる: 動いてはいけない秒数。 */
 export const STAIR_TEACHER_STOP = 1.6;
 /** 先生に止められたのに動いた: 止まる秒数。 */
@@ -342,8 +346,14 @@ export type StairEvent = {
   kind: "walker" | "teacher" | "friend";
   /** 見た目・せりふの違い (0〜2)。毎回、ランダムに変わる */
   variant: number;
-  phase: "idle" | "warn" | "stop" | "ask" | "talk" | "done";
+  phase: "idle" | "warn" | "stop" | "ask" | "talk" | "walk" | "done";
   elapsed: number;
+  /** おりてくる人の、いまいる段 (全体の段の数。おりてくる間だけ) */
+  pos: number;
+  /** ぶつかった */
+  touched: boolean;
+  /** すれ違った (よけた / ぶつかったを、数えた) */
+  scored: boolean;
 };
 
 export type StairsState = {
@@ -388,6 +398,9 @@ function makeStairs(
       variant: Math.min(2, Math.floor(rand() * 3)),
       phase: "idle",
       elapsed: 0,
+      pos: 0,
+      touched: false,
+      scored: false,
     });
   }
   return {
@@ -425,7 +438,8 @@ export const DOG_START_GAP = 170; // 犬との最初の距離 (px)
 export const VENDING_SECONDS = 2; // 自販機で、ひと息つく秒数
 export const FRIEND_SECONDS = 3; // 友達と立ち話をする秒数
 export const FRIEND_STAMINA = 40; // おにぎりで戻るスタミナ
-export const BIKE_WINDOW = 0.8; // 自転車が飛び出して、よけられる秒数
+export const BIKE_LEAD = 520; // 自転車は、この手前まで近づくと、走り出す (px)
+export const BIKE_SPEED = 220; // 自転車の速さ (px/s。こちらへ向かってくる)
 export const TEACHER_TAPS = 8; // 校門のあいさつの連打
 export const TEACHER_MAX = 5;
 /** 助ける / 渡る の前に、止まる位置 (できごとの手前、px)。 */
@@ -490,7 +504,8 @@ export type GameEvent =
       at: number;
       /** 見た目・せりふの違い (0〜2)。毎回、ランダムに変わる */
       variant: number;
-      phase: "idle" | "warn" | "done";
+      /** idle = 脇道で待っている、ride = 走り出した (動く障害物になる)、done = 通り過ぎた */
+      phase: "idle" | "ride" | "done";
       elapsed: number;
     }
   | {
@@ -505,8 +520,8 @@ export type GameEvent =
 
 export type EventKind = GameEvent["kind"];
 
-/** 障害物の種類: バッグ、ごみ箱、水たまり (雨の日)、猫。 */
-export type ObstacleKind = "bag" | "bin" | "puddle" | "cat";
+/** 障害物の種類: バッグ、ごみ箱、水たまり (雨の日)、猫。自転車は、走ってくる障害物 (できごと)。 */
+export type ObstacleKind = "bag" | "bin" | "puddle" | "cat" | "bike";
 
 export type Obstacle = {
   kind: ObstacleKind;
@@ -518,6 +533,12 @@ export type Obstacle = {
   hit: boolean;
   /** おばさんの体 (見て見ぬふりをしたとき) */
   body?: boolean;
+  /** 走ってくる速さ (px/s。左へ動く)。止まっている障害物は、なし */
+  speed?: number;
+  /** もう通り過ぎた (よけた) */
+  passed?: boolean;
+  /** 見た目の違い (0〜2) */
+  variant?: number;
 };
 
 export type Pace = "slow" | "normal" | "dash";
@@ -629,8 +650,9 @@ function makeEvent(kind: EventKind, at: number, variant = 0): GameEvent {
   }
 }
 
-/** できごとが始まる位置 (道のり)。お母さんと犬は、そこへ着いたとき。ほかは、手前で止まる。 */
+/** できごとが始まる位置 (道のり)。お母さんと犬は、そこへ着いたとき。自転車は、手前で走り出す。ほかは、手前で止まる。 */
 function triggerAt(event: GameEvent): number {
+  if (event.kind === "bike") return event.at - BIKE_LEAD;
   return event.kind === "mother" || event.kind === "dog"
     ? event.at
     : event.at - APPROACH;
@@ -859,13 +881,14 @@ const OBSTACLE_SIZES: Record<
   bin: { width: [20, 30], height: [28, 40] },
   puddle: { width: [34, 52], height: [6, 8] },
   cat: { width: [16, 22], height: [18, 26] },
+  bike: { width: [30, 30], height: [34, 34] },
 };
 
 /** 天気ごとの、障害物の種類の割合。雨の日は、水たまりが多い。 */
 const OBSTACLE_WEIGHTS: Record<Weather, Record<ObstacleKind, number>> = {
-  sunny: { bag: 0.55, bin: 0.25, puddle: 0, cat: 0.2 },
-  cloudy: { bag: 0.55, bin: 0.25, puddle: 0, cat: 0.2 },
-  rain: { bag: 0.35, bin: 0.15, puddle: 0.5, cat: 0 },
+  sunny: { bag: 0.55, bin: 0.25, puddle: 0, cat: 0.2, bike: 0 },
+  cloudy: { bag: 0.55, bin: 0.25, puddle: 0, cat: 0.2, bike: 0 },
+  rain: { bag: 0.35, bin: 0.15, puddle: 0.5, cat: 0, bike: 0 },
 };
 
 function pickObstacleKind(rand: () => number, weather: Weather): ObstacleKind {
@@ -1055,8 +1078,9 @@ function updateStamina(state: GameState, dt: number, dashing: boolean): void {
 export function jump(state: GameState): void {
   if (
     state.status === "playing" &&
-    state.stairs?.on !== true &&
     state.active === null &&
+    // 階段でも跳べる (降りてくる人をよける)。先生や友達のできごとの最中は、跳べない
+    (state.stairs?.on !== true || state.stairs.event === null) &&
     state.stun <= 0 &&
     state.y === 0
   ) {
@@ -1071,24 +1095,15 @@ export function press(state: GameState): void {
     return;
   }
   if (state.status !== "playing") return;
-  if (state.stairs?.on === true) {
-    pressStairs(state, state.stairs);
-    return;
-  }
   const event = state.active;
-  if (event === null) {
+  if (event === null || state.stairs?.on === true) {
     jump(state);
     return;
   }
   if (event.kind === "mother" && event.phase === "scold") event.taps += 1;
   else if (event.kind === "teacher" && event.phase === "greet") event.taps += 1;
   else if (event.kind === "obasan" && event.phase === "help") event.taps += 1;
-  else if (event.kind === "bike" && event.phase === "warn") {
-    // 自転車をよけた
-    event.phase = "done";
-    state.tags.bikeDodged = true;
-    state.active = null;
-  } else if (event.kind === "crossing" && event.phase === "dash") {
+  else if (event.kind === "crossing" && event.phase === "dash") {
     if (event.elapsed >= DASH_OPEN && event.elapsed <= DASH_CLOSE) {
       event.phase = "done";
       state.tags.dashed = true;
@@ -1165,6 +1180,8 @@ export function climb(state: GameState, side: "left" | "right"): void {
   const stairs = state.stairs;
   if (state.status !== "playing" || stairs === null || !stairs.on) return;
   if (state.stun > 0) return;
+  // 跳んでいる間は、足を出せない
+  if (state.y > 0 || state.vy > 0) return;
   const event = stairs.event;
   if (event !== null) {
     if (event.kind === "teacher" && event.phase === "stop") {
@@ -1203,16 +1220,6 @@ export function climb(state: GameState, side: "left" | "right"): void {
   }
 }
 
-/** 階段で押された (タップ / スペース): 降りてくる人をよける。 */
-function pressStairs(state: GameState, stairs: StairsState): void {
-  const event = stairs.event;
-  if (event !== null && event.kind === "walker" && event.phase === "warn") {
-    event.phase = "done";
-    stairs.event = null;
-    state.tags.stairDodged += 1;
-  }
-}
-
 /** 階段で選ぶ: 友達と、立ち話をするか。 */
 function chooseStairs(stairs: StairsState, option: 0 | 1): void {
   const event = stairs.event;
@@ -1228,23 +1235,53 @@ function chooseStairs(stairs: StairsState, option: 0 | 1): void {
 }
 
 function stepStairs(state: GameState, stairs: StairsState, dt: number): void {
+  // 跳んでいる間の動き (階段でも跳べる)
+  if (state.y > 0 || state.vy > 0) {
+    state.vy -= GRAVITY * dt;
+    state.y += state.vy * dt;
+    if (state.y <= 0) {
+      state.y = 0;
+      state.vy = 0;
+    }
+  }
   // スタミナは、休んでいるあいだに戻る
   state.stamina = Math.min(STAMINA_MAX, state.stamina + RECOVER * dt);
   if (state.exhausted && state.stamina >= RECOVER_AT) state.exhausted = false;
   if (state.stun > 0) state.stun = Math.max(0, state.stun - dt);
 
+  // おりてくる人: 階段の上の踊り場で待っていて、近づくとおりてくる (上る足は、止まらない)。
+  // こちらと同じ段に来たとき、跳んでいれば、よけられる。跳んでいなければ、ぶつかって転ぶ。
+  const here = stairs.steps + stairs.partial;
+  stairs.plan.forEach((walker, flight) => {
+    if (walker.kind !== "walker") return;
+    if (walker.phase === "idle") {
+      if (stairs.steps >= flight * STAIR_STEPS + WALKER_START_STEP) {
+        walker.phase = "walk";
+        walker.pos = stairActorStep(flight, "walker");
+      }
+      return;
+    }
+    if (walker.phase !== "walk") return;
+    walker.pos -= WALKER_SPEED * dt;
+    const gap = walker.pos - here;
+    // こちらの位置を通り過ぎるとき (すれ違う瞬間): 跳んでいれば、よけた。足元が低ければ、ぶつかる
+    if (!walker.scored && gap <= 0) {
+      walker.scored = true;
+      if (state.y < WALKER_CLEAR) {
+        walker.touched = true;
+        state.tags.stairHit += 1;
+        state.stun = STUN_SECONDS;
+      } else {
+        state.tags.stairDodged += 1;
+      }
+    }
+    if (gap < -4) walker.phase = "done";
+  });
+
   const event = stairs.event;
   if (event !== null) {
     event.elapsed += dt;
-    if (event.kind === "walker" && event.phase === "warn") {
-      if (event.elapsed >= WALKER_WINDOW) {
-        // よけられなかった: ぶつかって、転ぶ
-        event.phase = "done";
-        stairs.event = null;
-        state.tags.stairHit += 1;
-        state.stun = STUN_SECONDS;
-      }
-    } else if (event.kind === "teacher" && event.phase === "stop") {
+    if (event.kind === "teacher" && event.phase === "stop") {
       if (event.elapsed >= STAIR_TEACHER_STOP) {
         event.phase = "done";
         stairs.event = null;
@@ -1265,15 +1302,11 @@ function stepStairs(state: GameState, stairs: StairsState, dt: number): void {
     const planned = stairs.plan[Math.floor(stairs.steps / STAIR_STEPS)];
     if (
       planned !== undefined &&
+      planned.kind !== "walker" &&
       planned.phase === "idle" &&
       stairs.steps % STAIR_STEPS >= STAIR_EVENT_STEP
     ) {
-      planned.phase =
-        planned.kind === "walker"
-          ? "warn"
-          : planned.kind === "teacher"
-            ? "stop"
-            : "ask";
+      planned.phase = planned.kind === "teacher" ? "stop" : "ask";
       planned.elapsed = 0;
       stairs.event = planned;
     }
@@ -1354,11 +1387,10 @@ export function eventView(state: GameState): EventView | null {
             ? TEACHER_TAPS
             : 0,
     signal:
-      (event.kind === "crossing" &&
-        event.phase === "dash" &&
-        event.elapsed >= DASH_OPEN &&
-        event.elapsed <= DASH_CLOSE) ||
-      (event.kind === "bike" && event.phase === "warn"),
+      event.kind === "crossing" &&
+      event.phase === "dash" &&
+      event.elapsed >= DASH_OPEN &&
+      event.elapsed <= DASH_CLOSE,
     progress: 0,
     variant: event.variant,
   };
@@ -1412,15 +1444,6 @@ function stepEvent(state: GameState, event: GameEvent, dt: number): void {
       }
       state.active = null;
     }
-  } else if (event.kind === "bike" && event.phase === "warn") {
-    event.elapsed += dt;
-    if (event.elapsed >= BIKE_WINDOW) {
-      // よけられなかった: 転ぶ
-      event.phase = "done";
-      state.tags.bikeHit = true;
-      state.stun = stunSeconds(state);
-      state.active = null;
-    }
   } else if (event.kind === "crossing") {
     if (event.phase === "wait") {
       event.elapsed += dt;
@@ -1446,11 +1469,10 @@ function stepEvent(state: GameState, event: GameEvent, dt: number): void {
   }
 }
 
-/** 始まったときの段階 (お母さんと校門は連打、自転車は合図、ほかは選ぶ)。 */
+/** 始まったときの段階 (お母さんと校門は連打、ほかは選ぶ)。犬と自転車は、走りながら (止まらない)。 */
 const START_PHASE = {
   mother: "scold",
   teacher: "greet",
-  bike: "warn",
   obasan: "ask",
   crossing: "ask",
   vending: "ask",
@@ -1470,6 +1492,11 @@ export function stepGame(state: GameState, dt: number): void {
   if (state.stairs !== null && state.stairs.on) {
     stepStairs(state, state.stairs, dt);
     return;
+  }
+
+  // 走ってくる障害物 (自転車): こちらが止まっていても、走ってくる
+  for (const obstacle of state.obstacles) {
+    if (obstacle.speed) obstacle.at -= obstacle.speed * dt;
   }
 
   // ジャンプ (空中にいる間の動き)
@@ -1514,6 +1541,20 @@ export function stepGame(state: GameState, dt: number): void {
         state.chase = event;
         continue;
       }
+      if (event.kind === "bike") {
+        // 自転車は、脇道から走り出す (走りは止まらない。動く障害物になる)
+        event.phase = "ride";
+        state.obstacles.push({
+          kind: "bike",
+          at: event.at,
+          width: OBSTACLE_SIZES.bike.width[0],
+          height: OBSTACLE_SIZES.bike.height[0],
+          hit: false,
+          speed: BIKE_SPEED,
+          variant: event.variant,
+        });
+        continue;
+      }
       event.phase = START_PHASE[event.kind];
       state.active = event;
       // ほかのできごとが始まったら、犬は、あきらめて去る
@@ -1537,7 +1578,23 @@ export function stepGame(state: GameState, dt: number): void {
           obstacle.hit = true;
           state.stun = stunSeconds(state);
           state.tags.falls += 1;
+          if (obstacle.kind === "bike") state.tags.bikeHit = true;
           break;
+        }
+      }
+      // 自転車が、ぶつからずに通り過ぎた: よけた
+      for (const obstacle of state.obstacles) {
+        if (
+          obstacle.kind === "bike" &&
+          !obstacle.hit &&
+          !obstacle.passed &&
+          obstacle.at + obstacle.width - HIT_MARGIN <
+            state.distance + HIT_MARGIN
+        ) {
+          obstacle.passed = true;
+          state.tags.bikeDodged = true;
+          const ride = state.events.find((item) => item.kind === "bike");
+          if (ride) ride.phase = "done";
         }
       }
     }
