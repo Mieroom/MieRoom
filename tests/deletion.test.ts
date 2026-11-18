@@ -146,18 +146,21 @@ describe("削除したときの影響", () => {
       describeDeletion("subjects", counts({ pastLessons: 12 })).impacts,
     ).toEqual(["過去の授業12件は名前だけ残る"]);
   });
-  it("講師: 位置とタグも消える。その人は先生ではなくなる", () => {
+  it("講師: 位置とタグも消える。先生かどうかには触れない", () => {
     const impacts = describeDeletion(
       "teachers",
       counts({ pastLessons: 5, hasTag: true, hasLocation: true }),
     ).impacts;
     expect(impacts).toEqual([
       "過去の授業5件は名前だけ残る",
-      "位置とタグも消える。その人は先生ではなくなる",
+      "位置とタグも消える",
     ]);
-    expect(describeDeletion("teachers", counts()).impacts[1]).toContain(
-      "先生ではなくなる",
+    expect(describeDeletion("teachers", counts()).impacts[1]).toBe(
+      "登録も消える",
     );
+    expect(
+      describeDeletion("teachers", counts()).impacts.join(""),
+    ).not.toContain("先生ではなく");
   });
   it("教室: 終わった予約・使用止めも一緒に消える。受信機の登録も", () => {
     expect(
