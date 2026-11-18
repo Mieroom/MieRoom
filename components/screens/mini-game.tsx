@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MiniGameRanking, type FinishedRun } from "./mini-game-ranking";
+import Link from "next/link";
+import {
+  MiniGameRanking,
+  RankingRegister,
+  registerNotice,
+  type FinishedRun,
+} from "./mini-game-ranking";
 import {
   createDemoApi,
   serverApi,
@@ -55,8 +61,6 @@ const BEST_KEY = "mieroom.miniGame.best";
 const MODE_KEY = "mieroom.miniGame.mode";
 const CHARACTER_KEY = "mieroom.miniGame.character";
 const DIFFICULTY_KEY = "mieroom.miniGame.difficulty";
-// 終わった直後の連打で、すぐ始まり直さないための待ち時間 (ミリ秒)
-const RESTART_LOCK_MS = 450;
 // 重いタブやバックグラウンドから戻ったとき、一気に進まないための 1 コマの上限 (秒)
 const MAX_FRAME = 1 / 30;
 
@@ -147,6 +151,12 @@ function writeCharacter(id: string) {
     // 保存できなくても、遊べる
   }
 }
+
+// 終わったあとの画面のボタン (黄色: 主な操作、白っぽい: ほか)
+const BUTTON_MAIN =
+  "rounded-md bg-[#ffe066] px-4 py-1.5 text-sm font-bold text-[#1f2a44] hover:bg-white";
+const BUTTON_SUB =
+  "rounded-md bg-white/15 px-4 py-1.5 text-sm font-bold hover:bg-white/30";
 
 /** できごとの最中に、画面へ出す文。variant (0〜2) で、毎回、せりふが変わる。 */
 const TITLES: Record<string, string[]> = {
@@ -333,15 +343,17 @@ export function MiniGame({
   kinds,
   conditions,
   ranking = "off",
+  backHref = "/",
 }: {
   kinds?: EventKind[];
   conditions?: Partial<Conditions>;
   ranking?: "server" | "demo" | "off";
+  /** 終わったあとの「ミエルームに戻る」の行き先 */
+  backHref?: string;
 } = {}) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const game = useRef<GameState>(createGame());
   const best = useRef(0);
-  const overAt = useRef(0);
   const characterIndex = useRef(0);
   const difficultyRef = useRef<Difficulty>("normal");
   const modeRef = useRef<Mode>("normal");
@@ -368,6 +380,13 @@ export function MiniGame({
     (Summary & { isBest: boolean; run: FinishedRun }) | null
   >(null);
   const runCount = useRef(0);
+  // 終わったあとの画面: スコア → ランキングへの登録。登録した記録 (プレイごと) と、ランキングの読み直し
+  const [endView, setEndView] = useState<"score" | "register">("score");
+  const [registered, setRegistered] = useState<{
+    id: number;
+    text: string;
+  } | null>(null);
+  const [rankingReload, setRankingReload] = useState(0);
   // ランキングの読み書き (見本画面では、メモリの中の見本)
   const [rankingApi] = useState<RankingApi>(() =>
     ranking === "demo" ? createDemoApi() : serverApi,
@@ -411,26 +430,33 @@ export function MiniGame({
     }
   }, []);
 
-  // 押された: 始める / ジャンプ・連打・合図 / 終わったあとは、やり直す
+  // 押された: 始める / ジャンプ・連打・合図。終わったあとは、何もしない (ボタンで選ぶ)
   const press = useCallback(() => {
     const state = game.current;
     if (state.status === "ready") {
       begin(state);
     } else if (state.status === "waking" || state.status === "playing") {
       pressInGame(state);
-    } else if (performance.now() - overAt.current > RESTART_LOCK_MS) {
-      game.current = makeGame();
-      applyPace();
-      setResult(null);
-      setView(null);
-      setWake(null);
-      setStairs(null);
-      viewKey.current = "null";
-      wakeKey.current = "null";
-      stairsKey.current = "null";
-      begin(game.current);
     }
-  }, [applyPace, makeGame, begin]);
+  }, [begin]);
+
+  // 終わったあと、「もう一度」: タイトル画面 (モード・難易度・キャラを選べる、始める前の画面) へ戻る
+  const backToTitle = useCallback(() => {
+    if (game.current.status !== "arrived" && game.current.status !== "late") {
+      return;
+    }
+    game.current = makeGame();
+    held.current = { left: false, right: false };
+    setResult(null);
+    setView(null);
+    setWake(null);
+    setStairs(null);
+    setEndView("score");
+    viewKey.current = "null";
+    wakeKey.current = "null";
+    stairsKey.current = "null";
+    setPhase("ready");
+  }, [makeGame]);
 
   // 選ぶ (助ける / 通り過ぎる、待つ / 渡る)
   const pick = useCallback((option: 0 | 1) => {
@@ -442,11 +468,11 @@ export function MiniGame({
     climb(game.current, side);
   }, []);
 
-  // 難易度を替える (始める前と、終わったあと)。選んだ難易度は、この端末に覚えておく
+  // 難易度を替える (始める前だけ)。選んだ難易度は、この端末に覚えておく
   const changeDifficulty = useCallback(
     (next: Difficulty) => {
       const status = game.current.status;
-      if (status === "waking" || status === "playing") return;
+      if (status !== "ready") return;
       difficultyRef.current = next;
       setDifficulty(next);
       writeDifficulty(next);
@@ -462,7 +488,7 @@ export function MiniGame({
   const changeMode = useCallback(
     (next: Mode) => {
       const status = game.current.status;
-      if (status === "waking" || status === "playing") return;
+      if (status !== "ready") return;
       modeRef.current = next;
       setMode(next);
       writeMode(next);
@@ -474,9 +500,9 @@ export function MiniGame({
     [makeGame],
   );
 
-  // キャラを替える (始める前と、終わったあと)。選んだキャラは、この端末に覚えておく
+  // キャラを替える (始める前だけ)。選んだキャラは、この端末に覚えておく
   const changeCharacter = useCallback((step: number) => {
-    if (game.current.status === "playing") return;
+    if (game.current.status !== "ready") return;
     const count = CHARACTERS.length;
     const next = (characterIndex.current + step + count) % count;
     characterIndex.current = next;
@@ -520,7 +546,6 @@ export function MiniGame({
         (before === "playing" || before === "waking") &&
         (state.status === "arrived" || state.status === "late")
       ) {
-        overAt.current = now;
         const summary = summarize(state);
         // 通常: 点数、タイムアタック: タイム (0.1 秒の数)
         const value =
@@ -536,6 +561,7 @@ export function MiniGame({
           setBestMargin(value);
         }
         runCount.current += 1;
+        setEndView("score");
         setResult({
           ...summary,
           isBest,
@@ -598,6 +624,14 @@ export function MiniGame({
         return;
       }
       const state = game.current;
+      // 終わったあと: ボタンやリンクを選んで押すだけ (スペースを、ゲームのキーとして横取りしない)
+      if (
+        (state.status === "arrived" || state.status === "late") &&
+        event.target instanceof HTMLElement &&
+        event.target.closest("button, a")
+      ) {
+        return;
+      }
       if (event.code === "Space" || event.code === "ArrowUp") {
         event.preventDefault();
         if (!event.repeat) press();
@@ -628,17 +662,13 @@ export function MiniGame({
           choose(state, event.code === "Digit1" ? 0 : 1);
         }
       }
-      // モード: 始める前と、終わったあとに、T でも切り替えられる
-      if (
-        event.code === "KeyT" &&
-        state.status !== "playing" &&
-        !event.repeat
-      ) {
+      // モード: 始める前に、T でも切り替えられる
+      if (event.code === "KeyT" && state.status === "ready" && !event.repeat) {
         changeMode(modeRef.current === "normal" ? "timeattack" : "normal");
       }
-      // 難易度: 始める前と、終わったあとに、1 / 2 / 3 でも選べる
+      // 難易度: 始める前に、1 / 2 / 3 でも選べる
       const digit = ["Digit1", "Digit2", "Digit3"].indexOf(event.code);
-      if (digit >= 0 && state.status !== "playing" && !event.repeat) {
+      if (digit >= 0 && state.status === "ready" && !event.repeat) {
         changeDifficulty(DIFFICULTY_IDS[digit]);
       }
     };
@@ -893,8 +923,8 @@ export function MiniGame({
           </>
         )}
 
-        {/* 始める前と、終わったあと */}
-        {(phase === "ready" || over) && (
+        {/* 始める前 (タイトル): モード・難易度・キャラを選ぶ */}
+        {phase === "ready" && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <div className="flex max-w-[92%] flex-col items-center gap-1 rounded-lg bg-[#1f2a44]/85 px-5 py-3 text-center text-white">
               {phase === "ready" && (
@@ -930,57 +960,6 @@ export function MiniGame({
                         : `${bestMargin} 点`}
                     </p>
                   )}
-                </>
-              )}
-              {over && result && (
-                <>
-                  <p className="text-lg font-bold tracking-widest">
-                    {result.outcome === "arrived" ? "ゴール!" : "遅刻!"}
-                  </p>
-                  <p className="text-sm">
-                    {result.outcome === "arrived"
-                      ? result.mode === "timeattack"
-                        ? `タイム ${timeLabel(Math.round(result.elapsed * 10))}${
-                            result.isBest ? "  ベスト更新!" : ""
-                          }`
-                        : `評価 ${result.grade}  ${result.score} 点${
-                            result.isBest ? "  ベスト更新!" : ""
-                          }`
-                      : result.stairsFloor !== null
-                        ? `${result.arrival} に間に合わなかった (${result.stairsFloor} 階で時間切れ)`
-                        : `${result.arrival} に間に合わなかった (あと ${result.remaining} m)`}
-                  </p>
-                  {result.breakdown.length > 0 ? (
-                    <ul className="grid grid-cols-2 gap-x-4 text-[11px] opacity-90">
-                      {result.breakdown.map((line) => (
-                        <li
-                          key={line.label}
-                          className="flex justify-between gap-2 text-left"
-                        >
-                          <span>{line.label}</span>
-                          <span
-                            className={
-                              line.points < 0
-                                ? "text-[#ff9aa5]"
-                                : "text-[#ffe066]"
-                            }
-                          >
-                            {line.points > 0 ? "+" : ""}
-                            {line.points}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    result.notes.length > 0 && (
-                      <ul className="text-[11px] opacity-85">
-                        {result.notes.map((note) => (
-                          <li key={note}>{note}</li>
-                        ))}
-                      </ul>
-                    )
-                  )}
-                  <p className="text-xs">もう一度: タップ / スペース</p>
                 </>
               )}
               <div
@@ -1056,15 +1035,149 @@ export function MiniGame({
             </div>
           </div>
         )}
+
+        {/* 終わったあと: スコア → ランキングへの登録。スペース / タップでは始まらない (ボタンで選ぶ) */}
+        {over && result && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex max-w-[92%] flex-col items-center gap-1.5 rounded-lg bg-[#1f2a44]/90 px-5 py-3 text-center text-white">
+              {endView === "register" && result.outcome === "arrived" ? (
+                <>
+                  <p className="text-lg font-bold tracking-widest">
+                    ランキングに登録
+                  </p>
+                  <p className="text-sm">
+                    {MODE_NAMES[result.run.mode]}・
+                    {DIFFICULTIES[result.run.difficulty].name}{" "}
+                    {result.run.mode === "timeattack"
+                      ? timeLabel(result.run.value)
+                      : `${result.run.value} 点`}
+                  </p>
+                  {registered?.id === result.run.id ? (
+                    <p role="status" className="text-sm text-[#ffe066]">
+                      {registered.text}
+                    </p>
+                  ) : (
+                    <RankingRegister
+                      api={rankingApi}
+                      run={result.run}
+                      onDone={(response) => {
+                        setRegistered({
+                          id: result.run.id,
+                          text: registerNotice(result.run, response),
+                        });
+                        setRankingReload((count) => count + 1);
+                      }}
+                    />
+                  )}
+                  <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEndView("score")}
+                      className={BUTTON_SUB}
+                    >
+                      スコアに戻る
+                    </button>
+                    <button
+                      type="button"
+                      onClick={backToTitle}
+                      className={BUTTON_MAIN}
+                    >
+                      もう一度
+                    </button>
+                    <Link href={backHref} className={BUTTON_SUB}>
+                      ミエルームに戻る
+                    </Link>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-lg font-bold tracking-widest">
+                    {result.outcome === "arrived" ? "ゴール!" : "遅刻!"}
+                  </p>
+                  <p className="text-sm">
+                    {result.outcome === "arrived"
+                      ? result.mode === "timeattack"
+                        ? `タイム ${timeLabel(Math.round(result.elapsed * 10))}${
+                            result.isBest ? "  ベスト更新!" : ""
+                          }`
+                        : `評価 ${result.grade}  ${result.score} 点${
+                            result.isBest ? "  ベスト更新!" : ""
+                          }`
+                      : result.stairsFloor !== null
+                        ? `${result.arrival} に間に合わなかった (${result.stairsFloor} 階で時間切れ)`
+                        : `${result.arrival} に間に合わなかった (あと ${result.remaining} m)`}
+                  </p>
+                  {result.breakdown.length > 0 ? (
+                    <ul className="grid grid-cols-2 gap-x-4 text-[11px] opacity-90">
+                      {result.breakdown.map((line) => (
+                        <li
+                          key={line.label}
+                          className="flex justify-between gap-2 text-left"
+                        >
+                          <span>{line.label}</span>
+                          <span
+                            className={
+                              line.points < 0
+                                ? "text-[#ff9aa5]"
+                                : "text-[#ffe066]"
+                            }
+                          >
+                            {line.points > 0 ? "+" : ""}
+                            {line.points}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    result.notes.length > 0 && (
+                      <ul className="text-[11px] opacity-85">
+                        {result.notes.map((note) => (
+                          <li key={note}>{note}</li>
+                        ))}
+                      </ul>
+                    )
+                  )}
+                  {registered?.id === result.run.id && (
+                    <p role="status" className="text-xs text-[#ffe066]">
+                      {registered.text}
+                    </p>
+                  )}
+                  <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+                    {ranking !== "off" &&
+                      result.outcome === "arrived" &&
+                      result.run.value >= 1 &&
+                      registered?.id !== result.run.id && (
+                        <button
+                          type="button"
+                          onClick={() => setEndView("register")}
+                          className={BUTTON_MAIN}
+                        >
+                          ランキングに登録
+                        </button>
+                      )}
+                    <button
+                      type="button"
+                      onClick={backToTitle}
+                      className={BUTTON_MAIN}
+                    >
+                      もう一度
+                    </button>
+                    <Link href={backHref} className={BUTTON_SUB}>
+                      ミエルームに戻る
+                    </Link>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
       {ranking !== "off" && (
         <MiniGameRanking
           api={rankingApi}
           mode={mode}
           difficulty={difficulty}
-          run={
-            over && result && result.outcome === "arrived" ? result.run : null
-          }
+          reload={rankingReload}
         />
       )}
       <p role="status" className="sr-only">

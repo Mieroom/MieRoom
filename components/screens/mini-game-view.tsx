@@ -30,7 +30,12 @@ export function MiniGameView({
         actions={<LinkButton href={backHref}>もどる</LinkButton>}
       />
       <Card className="p-4 sm:p-5">
-        <MiniGame kinds={kinds} conditions={conditions} ranking={ranking} />
+        <MiniGame
+          kinds={kinds}
+          conditions={conditions}
+          ranking={ranking}
+          backHref={backHref}
+        />
       </Card>
     </div>
   );
