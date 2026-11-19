@@ -85,6 +85,23 @@
     #fff;
 }
 
+/* Date fields on iPhone (Safari and every iOS browser): with the native look the field
+   keeps its own width, ignores w-full and sticks out of its box, over the card edge or
+   the field beside it. Without the native look it follows the width it is given. The
+   date still opens the system picker. Its text is centred by iOS; put it back on the
+   left, like the other fields. */
+@layer base {
+  input[type="date"] {
+    appearance: none;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  input[type="date"]::-webkit-date-and-time-value {
+    text-align: left;
+  }
+}
+
 /* Selects: the native arrow is replaced by a light chevron with room on the right, so
    the text starts at the same inset as inputs. --chevron-inset moves the chevron. */
 @utility select-chevron {
