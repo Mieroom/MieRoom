@@ -24,6 +24,20 @@ import { Brand } from "./brand";
 
 // 共通のレイアウト (外部設計書 5-2). The name of the person is not shown after login.
 // The role only decides what is offered here; pages check it again on the server.
+// From sm the menu is always in view, so its items get lower as the window gets lower,
+// until the whole menu fits and nothing has to scroll. The padding is what is left of
+// the window height after everything else, shared among the items of that role:
+//   時間割管理者 18 items: brand + footer 157, labels, gaps and the fade 159, lines 432
+//   先生 10 items:        brand + footer 157, labels, gaps and the fade 112, lines 240
+// plus 12px to spare. An item is one 24px line, so 8px of padding is the full 40px and
+// 0 is the lowest (windows under about 760px high still scroll for 時間割管理者).
+// 学生 has 6 items and always fits. Phones keep the full height: fingers need it.
+const ITEM_PAD: Record<Role, string> = {
+  student: "",
+  teacher: "sm:py-[clamp(0px,calc((100dvh_-_521px)_/_20),8px)]",
+  admin: "sm:py-[clamp(0px,calc((100dvh_-_760px)_/_36),8px)]",
+};
+
 export function AppShell({
   role,
   todayText,
@@ -135,7 +149,7 @@ export function AppShell({
                         }
                         aria-current={active ? "page" : undefined}
                         onClick={() => setMenuOpen(false)}
-                        className={`flex items-center gap-3 rounded-[9px] px-3 py-2 font-medium transition-colors hover:bg-[#edf0f5] hover:text-navy sm:[@media(max-height:820px)]:py-1.5 ${
+                        className={`flex items-center gap-3 rounded-[9px] px-3 py-2 font-medium transition-colors hover:bg-[#edf0f5] hover:text-navy ${ITEM_PAD[role]} ${
                           active
                             ? "bg-[#e8ecff] font-bold text-brand-dark"
                             : "text-[#4a576c]"
