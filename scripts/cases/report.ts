@@ -8,7 +8,7 @@
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { RESERVATION_CASES } from "../../tests/cases/reservation.cases";
+import { ALL_CASES } from "../../tests/cases/index";
 import { buildRows, runFileSchema, summarize, toCsv } from "./lib";
 
 const ROOT = process.cwd();
@@ -32,18 +32,18 @@ function main() {
   const runFile = runFileSchema.parse(
     JSON.parse(readFileSync(path.join(RESULTS_DIR, name), "utf8")),
   );
-  const rows = buildRows(RESERVATION_CASES, runFile);
+  const rows = buildRows(ALL_CASES, runFile);
   mkdirSync(REPORTS_DIR, { recursive: true });
   const target = path.join(REPORTS_DIR, name.replace(/\.json$/, ".csv"));
   writeFileSync(target, toCsv(rows), "utf8");
 
-  const count = summarize(RESERVATION_CASES, runFile);
+  const count = summarize(ALL_CASES, runFile);
   console.log(`作成: ${path.relative(ROOT, target)}`);
   console.log(
     `結果のファイル: ${name}(実行 ${runFile.run.at}、コミット ${runFile.run.commit}${runFile.run.dirty ? "・コミット前の変更あり" : ""})`,
   );
   console.log(
-    `台帳 ${RESERVATION_CASES.length} 件: 合格 ${count.合格}、失敗 ${count.失敗}、スキップ ${count.スキップ}、未実施 ${count.未実施}`,
+    `台帳 ${ALL_CASES.length} 件: 合格 ${count.合格}、失敗 ${count.失敗}、スキップ ${count.スキップ}、未実施 ${count.未実施}`,
   );
 }
 

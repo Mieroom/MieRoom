@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { RESERVATION_CASES } from "./reservation.cases";
+import { ALL_CASES } from "./index";
 import type { TestCase } from "./schema";
 
 // 台帳(tests/cases/*.cases.ts)と、結合テスト(tests/integration/*.it.ts)が、ずれていないか。
@@ -9,10 +9,10 @@ import type { TestCase } from "./schema";
 //
 // 拾い方(制限): テスト名の先頭の ID は `it("T-APR-001 …")` の形から、ループで作る名前は
 // `id: "T-APR-022"` の形から、文字列として拾う。1 つの名前に ID が複数あるとき(例: T-RSV-002/003)は、
-// 先頭の 1 つだけ。台帳が扱う分野(台帳に 1 件でもある分野。いまは T-APR と T-IMP)のテストだけを調べる。
+// 先頭の 1 つだけ。台帳が扱う分野(台帳に 1 件でもある分野。いまは T-APR、T-IMP、T-BLK)のテストだけを調べる。
 // 分野を広げるときは、その分野のケースを台帳に足す。足すまでは、その分野は調べない。
 
-const CASES: TestCase[] = [...RESERVATION_CASES];
+const CASES: readonly TestCase[] = ALL_CASES;
 const INTEGRATION_DIR = path.join(process.cwd(), "tests", "integration");
 
 const ID = "T-[A-Z]+-\\d{3}[a-z]?";

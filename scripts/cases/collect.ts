@@ -10,7 +10,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { RESERVATION_CASES } from "../../tests/cases/reservation.cases";
+import { ALL_CASES } from "../../tests/cases/index";
 import {
   extractResults,
   jst,
@@ -42,7 +42,7 @@ function main() {
   const report = vitestReportSchema.parse(
     JSON.parse(readFileSync(path.resolve(ROOT, reportPath), "utf8")),
   );
-  const known = new Set(RESERVATION_CASES.map((item) => item.id));
+  const known = new Set(ALL_CASES.map((item) => item.id));
   const results = extractResults(report, known);
   if (results.length === 0) {
     throw new Error("台帳にある ID のテストが、報告に 1 件もありません");
