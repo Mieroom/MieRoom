@@ -43,7 +43,7 @@ function main() {
     `結果のファイル: ${name}(実行 ${runFile.run.at}、コミット ${runFile.run.commit}${runFile.run.dirty ? "・コミット前の変更あり" : ""})`,
   );
   console.log(
-    `台帳 ${ALL_CASES.length} 件: 合格 ${count.合格}、失敗 ${count.失敗}、スキップ ${count.スキップ}、未実施 ${count.未実施}`,
+    `台帳 ${ALL_CASES.length} 件: 合格 ${count.合格}、失敗 ${count.失敗}、既知の不具合 ${count.既知の不具合}、スキップ ${count.スキップ}、未実施 ${count.未実施}`,
   );
 }
 

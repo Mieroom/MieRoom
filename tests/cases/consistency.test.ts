@@ -16,9 +16,29 @@ const CASES: readonly TestCase[] = ALL_CASES;
 const INTEGRATION_DIR = path.join(process.cwd(), "tests", "integration");
 
 const ID = "T-[A-Z]+-\\d{3}[a-z]?";
-const FROM_TEST_NAME = new RegExp(`\\bit\\(\\s*[\`"'](${ID})(?![\\w])`, "g");
+const FROM_TEST_NAME = new RegExp(
+  `\\bit(?:\\.fails)?\\(\\s*[\`"'](${ID})(?![\\w])`,
+  "g",
+);
 const FROM_TABLE = new RegExp(`\\bid:\\s*"(${ID})"`, "g");
+/** 既知の不具合の印: it.fails("T-MST-001a [既知 #34] …")。it か it.fails か、ID、Issue の番号。 */
+const MARKED = new RegExp(
+  `\\b(it(?:\\.fails)?)\\(\\s*[\`"'](${ID})\\s*\\[既知 #(\\d+)\\]`,
+  "g",
+);
 const area = (id: string) => id.replace(/-\d{3}[a-z]?$/, "");
+
+function markedTests(): { fn: string; id: string; issue: number }[] {
+  const found: { fn: string; id: string; issue: number }[] = [];
+  for (const name of readdirSync(INTEGRATION_DIR)) {
+    if (!name.endsWith(".it.ts")) continue;
+    const source = readFileSync(path.join(INTEGRATION_DIR, name), "utf8");
+    for (const match of source.matchAll(MARKED)) {
+      found.push({ fn: match[1], id: match[2], issue: Number(match[3]) });
+    }
+  }
+  return found;
+}
 
 function idsInIntegrationTests(): Set<string> {
   const ids = new Set<string>();
@@ -65,6 +85,25 @@ describe("テストケース台帳と結合テストの照合", () => {
     const missing = [...inTests]
       .filter((id) => areas.has(area(id)) && !known.has(id))
       .sort();
+    expect(missing).toEqual([]);
+  });
+
+  it("既知の不具合の印は、it.fails のテストにだけ付く(it に付けると、不具合のまま合格として見逃す)", () => {
+    const wrong = markedTests()
+      .filter((m) => m.fn !== "it.fails")
+      .map((m) => m.id);
+    expect(wrong).toEqual([]);
+  });
+
+  it("既知の不具合の印の Issue 番号は、台帳の同じケースの issues にある", () => {
+    const marked = markedTests();
+    expect(marked.length).toBeGreaterThan(0); // 拾い方の確認(いまは、教室の 4 件がある)
+    const missing = marked
+      .filter(
+        (m) =>
+          !CASES.find((item) => item.id === m.id)?.issues.includes(m.issue),
+      )
+      .map((m) => `${m.id} #${m.issue}`);
     expect(missing).toEqual([]);
   });
 });
