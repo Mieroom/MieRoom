@@ -10,7 +10,7 @@ const meta = {
   no: "MR-00",
   title: "提出物一覧・構成説明書",
   subtitle: "作品本体と提出書類の全体像",
-  version: "1.0",
+  version: "1.1",
   date: V.DATE,
   file: "00_提出物一覧・構成説明書.docx",
 };

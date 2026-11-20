@@ -8,7 +8,7 @@ const meta = {
   no: "MR-02",
   title: "導入・起動手順書",
   subtitle: "必要な環境、導入、起動、デプロイ、よくあるエラー",
-  version: "1.0",
+  version: "1.1",
   date: V.DATE,
   file: "02_導入・起動手順書.docx",
 };
@@ -176,8 +176,8 @@ const body = [
       [
         "`STUDENT_EMAIL_PATTERN`",
         "学生のメールの形(@ の前)",
-        "任意",
-        "例: `[0-9]{6}`。合わない学校のメールは先生になる。省略すると、講師マスタのメールだけで先生を決める",
+        "○",
+        "例: `[0-9]{6}`。合わない学校のメールは先生になる。**未設定だと、起動時にエラーで止まる**(全員の役割を間違えないため)",
       ],
       [
         "`ENABLE_DEV_PAGES`",
@@ -192,7 +192,7 @@ const body = [
         "どちらか未設定なら、受け口は 403 を返す。鍵は 64 文字の 16 進数",
       ],
       [
-        "`SEED_ALLOWED_EMAILS`、`SEED_ADMIN_EMAILS`、`SEED_TEACHER_EMAILS`",
+        "`SEED_ALLOWED_EMAILS`、`SEED_ADMIN_EMAILS`",
         "初期データ投入用のメール(カンマ区切り)",
         "投入のとき",
         "自分の PC の `.env.local` だけに書く",
@@ -206,6 +206,9 @@ const body = [
     ],
     [26, 30, 10, 34],
     { size: 16 },
+  ),
+  p(
+    "`.env.example` には、いまは使っていない変数(`LOGIN_PROVIDER`、`GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`CRON_SECRET`)もある。コードでは読んでいないので、空のままでよい(ログインは Microsoft だけ。定期実行は未実装)。",
   ),
   h3("鍵の作り方"),
   ...code([
@@ -223,7 +226,7 @@ const body = [
     "`db push` は、表の定義を DB に合わせるコマンドで、定義にない列は消える場合がある。**本番のデータがある DB には、バックアップ(Neon のブランチ)を作ってから行う。**",
     "warn",
   ),
-  h2("6-2. 最初の許可リスト・管理者・先生を入れる(開発環境のみ)"),
+  h2("6-2. 最初の許可リスト・管理者を入れる(開発環境のみ)"),
   ...code([
     "# .env.local に SEED_ALLOWED_EMAILS=a@school.example,b@school.example などを書いてから",
     "npm run db:seed",
@@ -231,6 +234,7 @@ const body = [
   bullets([
     "メールアドレスは、実行時に環境変数から読む(Git に入らない)。何度実行しても、すでにある行はそのまま。",
     "`APP_ENV=production` のときは、実行を拒否する(開発用)。本番の最初の管理者は、`INITIAL_ADMIN_EMAIL` で決める。",
+    "先生は、登録しない。学生の形(`STUDENT_EMAIL_PATTERN`)に合わない学校のアカウントが、自動で先生になる。",
   ]),
   h2("6-3. デモ用のマスタを入れる"),
   p(

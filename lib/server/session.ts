@@ -53,10 +53,16 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     select: { email: true },
   });
 
+  const teachers = await db.teacherEmail.findMany({
+    where: { email },
+    select: { email: true },
+  });
+
   const role = determineRole({
     email,
     initialAdminEmail: env.INITIAL_ADMIN_EMAIL,
     adminEmails: admins.map((row) => row.email),
+    teacherEmails: teachers.map((row) => row.email),
     studentEmailPattern: env.STUDENT_EMAIL_PATTERN,
   });
 

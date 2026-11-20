@@ -102,6 +102,16 @@ model AdminEmail {
   @@map("admin_emails")
 }
 
+// 先生として扱うメール (テスト用)。基本は、メールの形で決まる (03 章)。ここにあるメールは、形が学生でも先生になる。
+// 追加・削除は、画面ではなく DB で行う。管理者が優先で、ここにあっても管理者は管理者のまま。
+model TeacherEmail {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  createdAt DateTime @default(now())
+
+  @@map("teacher_emails")
+}
+
 // E03 講師。メールは、先生の判定に学生の形を使うときは使わない (任意)。
 model Teacher {
   id          String   @id @default(uuid()) @db.Uuid

@@ -78,7 +78,7 @@ function impactsFor(kind: MasterKind, counts: DeletionCounts): string[] {
     case "teachers":
       impacts.push(`過去の授業${counts.pastLessons}件は名前だけ残る`);
       impacts.push(
-        `${counts.hasLocation ? "位置と" : ""}${counts.hasTag ? "タグも" : "登録も"}消える。その人は先生ではなくなる`,
+        `${counts.hasLocation ? "位置と" : ""}${counts.hasTag ? "タグも" : "登録も"}消える`,
       );
       break;
     case "rooms":

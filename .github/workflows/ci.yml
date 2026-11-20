@@ -59,3 +59,58 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:integration
+
+  # 脆弱性の検査 (テスト方針 段階 A): npm audit の高以上の指摘で失敗にする。
+  # 修正版がないなどで通す指摘は、scripts/audit-gate.mjs の例外の一覧に、理由つきで書く。
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: node scripts/audit-gate.mjs
+
+  # 秘密の値 (鍵・パスワード・トークン) が、コードや履歴に入っていないかの検査。
+  # gitleaks-action は、組織のリポジトリでは有料のライセンスが要る (2026-11-19 に、組織へ移して判明)。
+  # そのため、本体 (オープンソース) を直接動かす。版とチェックサムを固定して、
+  # 取得したファイルが変わっていないことを確かめる。版を上げるときは、公式の checksums.txt で
+  # linux_x64 の値を確かめて、両方を同時に変える。
+  gitleaks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: gitleaks を取得して、チェックサムを確かめる
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tar.gz" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+      - name: 履歴全体を調べる
+        run: |
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose --log-level warn .
+
+  # コードの脆弱性の検査 (CodeQL)。結果は GitHub の Security タブに出る。
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:javascript-typescript"
