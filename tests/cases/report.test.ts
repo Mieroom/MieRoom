@@ -197,14 +197,97 @@ describe("報告書の行(buildRows)と集計(summarize)", () => {
       合格: 0,
       失敗: 0,
       スキップ: 0,
+      既知の不具合: 0,
       未実施: 3,
     });
     expect(summarize(CASES, RUN)).toEqual({
       合格: 1,
       失敗: 1,
       スキップ: 0,
+      既知の不具合: 0,
       未実施: 1,
     });
+  });
+
+  it("既知の不具合は、結果の欄に「既知の不具合」、失敗のメッセージの欄に Issue の番号が出る。集計は別に数える", () => {
+    const known: RunFile = {
+      ...RUN,
+      results: [
+        { id: "T-APR-001", status: "known-defect", durationMs: 5, issue: 34 },
+        { id: "T-APR-002", status: "passed", durationMs: 7 },
+      ],
+    };
+    const rows = buildRows(CASES, known);
+    expect(rows[0][11]).toBe("既知の不具合");
+    expect(rows[0][16]).toContain("#34");
+    expect(rows[1][11]).toBe("合格");
+    expect(summarize(CASES, known)).toEqual({
+      合格: 1,
+      失敗: 0,
+      スキップ: 0,
+      既知の不具合: 1,
+      未実施: 1,
+    });
+  });
+});
+
+describe("既知の不具合の印(案 A: it.fails と Issue の番号)", () => {
+  it("印([既知 #番号])があって、報告が「合格」(it.fails が期待どおり失敗した)なら、既知の不具合。Issue の番号を残す", () => {
+    const results = extractResults(
+      report([
+        {
+          title: "T-APR-001 [既知 #34] 承認できる",
+          status: "passed",
+          duration: 5,
+        },
+      ]),
+      KNOWN,
+    );
+    expect(results).toEqual([
+      { id: "T-APR-001", status: "known-defect", durationMs: 5, issue: 34 },
+    ]);
+  });
+
+  it("印があるのに、報告が「失敗」(it.fails なのに、期待どおりに通ってしまった = 直った可能性)なら、失敗として残す", () => {
+    const results = extractResults(
+      report([
+        {
+          title: "T-APR-001 [既知 #34] 承認できる",
+          status: "failed",
+          duration: 5,
+          msg: ["Error: Expect test to fail"],
+        },
+      ]),
+      KNOWN,
+    );
+    expect(results).toEqual([
+      {
+        id: "T-APR-001",
+        status: "failed",
+        durationMs: 5,
+        failure: "Error: Expect test to fail",
+      },
+    ]);
+  });
+
+  it("印がなければ、「合格」は合格のまま(既知の不具合にしない)", () => {
+    const [result] = extractResults(
+      report([{ title: "T-APR-001 承認できる", status: "passed" }]),
+      KNOWN,
+    );
+    expect(result.status).toBe("passed");
+  });
+
+  it("同じ ID に、既知の不具合と合格が混ざれば、失敗でない中では、既知の不具合を優先して残す", () => {
+    const [result] = extractResults(
+      report([
+        { title: "T-APR-001 一つ目", status: "passed", duration: 1 },
+        { title: "T-APR-001 [既知 #34] 二つ目", status: "passed", duration: 1 },
+      ]),
+      KNOWN,
+    );
+    expect(result.status).toBe("known-defect");
+    expect(result.issue).toBe(34);
   });
 });
 

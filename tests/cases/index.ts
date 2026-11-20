@@ -1,3 +1,4 @@
+import { MASTER_CASES } from "./masters.cases";
 import { BLOCK_CASES } from "./room-block.cases";
 import { RESERVATION_CASES } from "./reservation.cases";
 import type { TestCase } from "./schema";
@@ -10,4 +11,5 @@ export const ALL_CASES: readonly TestCase[] = [
   ...BLOCK_CASES,
   ...TIMETABLE_IMPORT_CASES,
   ...TIMETABLE_IMPORT_2_CASES,
+  ...MASTER_CASES,
 ];

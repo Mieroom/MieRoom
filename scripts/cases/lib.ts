@@ -35,9 +35,12 @@ export const runFileSchema = z.object({
   results: z.array(
     z.object({
       id: z.string(),
-      status: z.enum(["passed", "failed", "skipped"]),
+      /** known-defect: 既知の不具合(Issue がある。テストは、失敗を期待する印 it.fails つき) */
+      status: z.enum(["passed", "failed", "skipped", "known-defect"]),
       durationMs: z.number(),
       failure: z.string().optional(),
+      /** known-defect のときの、GitHub Issue の番号 */
+      issue: z.number().int().positive().optional(),
     }),
   ),
 });
@@ -58,7 +61,15 @@ function firstLine(messages: string[] | undefined): string | undefined {
 const toStatus = (status: string): CaseResult["status"] =>
   status === "passed" ? "passed" : status === "failed" ? "failed" : "skipped";
 
-const RANK = { passed: 0, skipped: 1, failed: 2 } as const;
+const RANK = { passed: 0, "known-defect": 1, skipped: 2, failed: 3 } as const;
+
+/**
+ * 既知の不具合の印: テスト名の `[既知 #34]`。期待どおりに書いたテストが、実装の不具合で失敗する間は、
+ * `it.fails`(失敗を期待する)にして、この印と Issue の番号を付ける(案 A)。`it.fails` のテストは、
+ * 失敗したとき「合格」と報告されるので、印があれば「既知の不具合」と読み替える。直って、期待どおりに
+ * 通るようになると、`it.fails` のテストが失敗として報告されるので、印を外すことに気づける。
+ */
+const KNOWN_DEFECT = /\[既知 #(\d+)\]/;
 
 /**
  * vitest の報告から、台帳にある ID のテストだけを取り出す。テスト名の先頭の ID で結びつける。
@@ -73,7 +84,11 @@ export function extractResults(
     for (const test of file.assertionResults) {
       const id = LEADING_ID.exec(test.title)?.[1];
       if (id === undefined || !knownIds.has(id)) continue;
-      const status = toStatus(test.status);
+      const marked = KNOWN_DEFECT.exec(test.title)?.[1];
+      const status =
+        marked !== undefined && test.status === "passed"
+          ? "known-defect"
+          : toStatus(test.status);
       const found: CaseResult = {
         id,
         status,
@@ -81,6 +96,7 @@ export function extractResults(
         ...(status === "failed"
           ? { failure: firstLine(test.failureMessages) }
           : {}),
+        ...(status === "known-defect" ? { issue: Number(marked) } : {}),
       };
       const before = byId.get(id);
       if (before === undefined) {
@@ -106,6 +122,7 @@ const STATUS_TEXT = {
   passed: "合格",
   failed: "失敗",
   skipped: "スキップ",
+  "known-defect": "既知の不具合",
 } as const;
 
 const COLUMNS = [
@@ -157,7 +174,9 @@ export function buildRows(
         : `${runFile.run.commit}${runFile.run.dirty ? "(コミット前)" : ""}`,
       result === undefined || runFile === null ? "" : where,
       result === undefined ? "" : String(result.durationMs),
-      result?.failure ?? "",
+      result?.status === "known-defect"
+        ? `既知の不具合(Issue #${result.issue}。実装は、直す段階で直す)`
+        : (result?.failure ?? ""),
     ];
   });
 }
@@ -179,8 +198,8 @@ export function toCsv(rows: readonly (readonly string[])[]): string {
 export function summarize(
   cases: readonly TestCase[],
   runFile: RunFile | null,
-): Record<"合格" | "失敗" | "スキップ" | "未実施", number> {
-  const count = { 合格: 0, 失敗: 0, スキップ: 0, 未実施: 0 };
+): Record<"合格" | "失敗" | "スキップ" | "既知の不具合" | "未実施", number> {
+  const count = { 合格: 0, 失敗: 0, スキップ: 0, 既知の不具合: 0, 未実施: 0 };
   const results = new Map(runFile?.results.map((r) => [r.id, r.status]));
   for (const item of cases) {
     const status = results.get(item.id);
