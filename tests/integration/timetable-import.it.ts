@@ -1,4 +1,3 @@
-import { NextRequest } from "next/server";
 import {
   afterAll,
   afterEach,
@@ -45,156 +44,27 @@ vi.mock("@/lib/server/db", async () => {
 import { POST as apply } from "@/app/(main)/admin/import/apply/route";
 import { POST as check } from "@/app/(main)/admin/import/check/route";
 
-const HOST = "mieroom.example";
 const CLASS_NAME = "システム専攻1年";
 const CLASS_B = "00000000-0000-4000-8000-000000000011";
 
 const at = (jst: string) => vi.setSystemTime(new Date(`${jst}:00+09:00`));
 
-// ---- 取込用 CSV を作る補助 --------------------------------------------------------------
-
-const HEAD = [
-  "クラス",
-  "日付",
-  "曜日",
-  "時限",
-  "開始",
-  "終了",
-  "科目",
-  "講師",
-  "教室",
-  "区分",
-  "当月の最終入力日",
-  "翌月の最終入力日",
-  "対象年月",
-  "ホームルーム教室",
-];
-type Cells = Record<string, string>;
-
-/** 11 月の休み・行事。11/12・13 と 11/23 は、全校の休み・行事(seedBase)と同じ名前。 */
-const CLOSURES: Record<string, string> = {
-  "2026-11-03": "文化の日",
-  "2026-11-12": "学園祭",
-  "2026-11-13": "学園祭",
-  "2026-11-23": "勤労感謝の日",
-};
-
-const WEEKDAY = ["日", "月", "火", "水", "木", "金", "土"];
-
-/**
- * 2026 年 11 月の、正しい 1 か月分。平日 21 日のうち、休み・行事の 4 日を除く 17 日に、1限の授業
- * (田村・展示室・固定)。最初の授業の行は、2 行目(11/2)。
- */
-function monthCells(
-  closures: Record<string, string> = CLOSURES,
-  className = CLASS_NAME,
-): Cells[] {
-  const rows: Cells[] = [];
-  for (let day = 1; day <= 30; day++) {
-    const date = `2026-11-${String(day).padStart(2, "0")}`;
-    const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
-    if (weekday === 0 || weekday === 6) continue;
-    const common = {
-      クラス: className,
-      日付: date,
-      曜日: WEEKDAY[weekday],
-      当月の最終入力日: "2026-11-30",
-      翌月の最終入力日: "",
-      対象年月: "202611",
-      ホームルーム教室: "101",
-    };
-    const closure = closures[date];
-    rows.push(
-      closure === undefined
-        ? {
-            ...common,
-            時限: "1限",
-            開始: "9:15",
-            終了: "10:45",
-            科目: "プログラミング",
-            講師: "田村",
-            教室: ROOM_FREE_NAME,
-            区分: "固定",
-          }
-        : {
-            ...common,
-            時限: "",
-            開始: "",
-            終了: "",
-            科目: closure,
-            講師: "",
-            教室: "",
-            区分: "休み・行事",
-          },
-    );
-  }
-  return rows;
-}
-
-const FIRST_LESSON_LINE = 2; // 見出しが 1 行目。最初の行は 11/2(月)の授業
-
-function csvText(rows: Cells[], head: string[] = HEAD): string {
-  const lines = [head.join(",")];
-  for (const row of rows) lines.push(head.map((h) => row[h] ?? "").join(","));
-  return `${lines.join("\r\n")}\r\n`;
-}
-
-type Upload = { name: string; bytes: Uint8Array };
-const utf8 = (text: string) => new TextEncoder().encode(text);
-const csvFile = (name: string, rows: Cells[], head?: string[]): Upload => ({
-  name,
-  bytes: utf8(csvText(rows, head)),
-});
-
-/** A request the way a browser sends it: the body is already encoded and its length is known. */
-async function upload(path: string, files: Upload[]) {
-  const form = new FormData();
-  for (const file of files) {
-    form.append(
-      "files",
-      new File([file.bytes as BlobPart], file.name, { type: "text/csv" }),
-    );
-  }
-  const encoded = new Response(form);
-  const body = new Uint8Array(await encoded.arrayBuffer());
-  return new NextRequest(`https://${HOST}${path}`, {
-    method: "POST",
-    body,
-    headers: {
-      host: HOST,
-      "sec-fetch-site": "same-origin",
-      "content-type": encoded.headers.get("content-type")!,
-      "content-length": String(body.length),
-    },
-  });
-}
-
-type Issue = {
-  level: string;
-  code: string;
-  line: number | null;
-  message: string;
-};
-type FileView = {
-  name: string;
-  className: string | null;
-  month: string | null;
-  lessonCount: number;
-  closureCount: number;
-  verdict: string;
-  issues: Issue[];
-};
-type View = {
-  files: FileView[];
-  general: Issue[];
-  ok: boolean;
-  lostChanges: number;
-};
-type ApplyBody = {
-  kind: "imported" | "invalid";
-  view: View;
-  summary?: { months: { month: string; classes: number; lessons: number }[] };
-};
+import {
+  CLOSURES,
+  EMPTY,
+  FIRST_LESSON_LINE,
+  HEAD,
+  counts,
+  csvFile,
+  issueOf,
+  monthCells,
+  upload,
+  utf8,
+  type ApplyBody,
+  type Cells,
+  type Upload,
+  type View,
+} from "./support/timetable-csv";
 
 const runCheck = async (files: Upload[]) => {
   const response = await check(await upload("/admin/import/check", files));
@@ -204,19 +74,6 @@ const runApply = async (files: Upload[]) => {
   const response = await apply(await upload("/admin/import/apply", files));
   return { response, body: (await response.json()) as ApplyBody };
 };
-const issueOf = (file: FileView, code: string) =>
-  file.issues.find((issue) => issue.code === code);
-
-async function counts() {
-  const db = testDb();
-  return {
-    lessons: await db.lesson.count(),
-    lessonTeachers: await db.lessonTeacher.count(),
-    months: await db.monthStatus.count(),
-    toolClosures: await db.closure.count({ where: { source: "TOOL" } }),
-  };
-}
-const EMPTY = { lessons: 0, lessonTeachers: 0, months: 0, toolClosures: 0 };
 
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
