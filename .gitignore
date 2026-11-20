@@ -50,3 +50,6 @@ next-env.d.ts
 # 提出用の Word 書類の作成物と、集めた数字の置き場
 /submission-docs/
 /.docs-cache/
+
+# テストケース台帳の報告書(CSV)。結果のファイル(tests/cases/results/)は、節目だけコミットする
+/tests/cases/reports/
