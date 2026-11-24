@@ -1,0 +1,641 @@
+{
+  "run": {
+    "at": "2026-11-24T09:52:43+09:00",
+    "commit": "9cbe4b1",
+    "dirty": false,
+    "where": "local",
+    "suite": "integration",
+    "tool": "vitest 5.0.5"
+  },
+  "results": [
+    {
+      "id": "T-APR-001",
+      "status": "passed",
+      "durationMs": 3781
+    },
+    {
+      "id": "T-APR-002",
+      "status": "passed",
+      "durationMs": 1752
+    },
+    {
+      "id": "T-APR-003",
+      "status": "passed",
+      "durationMs": 1754
+    },
+    {
+      "id": "T-APR-004",
+      "status": "passed",
+      "durationMs": 3151
+    },
+    {
+      "id": "T-APR-005",
+      "status": "passed",
+      "durationMs": 2161
+    },
+    {
+      "id": "T-APR-006",
+      "status": "passed",
+      "durationMs": 2027
+    },
+    {
+      "id": "T-APR-006x",
+      "status": "passed",
+      "durationMs": 1838
+    },
+    {
+      "id": "T-APR-007",
+      "status": "passed",
+      "durationMs": 1934
+    },
+    {
+      "id": "T-APR-008",
+      "status": "passed",
+      "durationMs": 1946
+    },
+    {
+      "id": "T-APR-009",
+      "status": "passed",
+      "durationMs": 2535
+    },
+    {
+      "id": "T-APR-009b",
+      "status": "passed",
+      "durationMs": 2623
+    },
+    {
+      "id": "T-APR-010",
+      "status": "passed",
+      "durationMs": 1959
+    },
+    {
+      "id": "T-APR-011",
+      "status": "passed",
+      "durationMs": 2851
+    },
+    {
+      "id": "T-APR-012",
+      "status": "passed",
+      "durationMs": 1964
+    },
+    {
+      "id": "T-APR-013",
+      "status": "passed",
+      "durationMs": 2149
+    },
+    {
+      "id": "T-APR-015",
+      "status": "passed",
+      "durationMs": 2809
+    },
+    {
+      "id": "T-APR-022",
+      "status": "passed",
+      "durationMs": 1882
+    },
+    {
+      "id": "T-APR-023a",
+      "status": "passed",
+      "durationMs": 2152
+    },
+    {
+      "id": "T-APR-023b",
+      "status": "passed",
+      "durationMs": 1616
+    },
+    {
+      "id": "T-APR-024",
+      "status": "passed",
+      "durationMs": 1625
+    },
+    {
+      "id": "T-APR-025",
+      "status": "passed",
+      "durationMs": 1683
+    },
+    {
+      "id": "T-APR-026a",
+      "status": "passed",
+      "durationMs": 1953
+    },
+    {
+      "id": "T-APR-026b",
+      "status": "passed",
+      "durationMs": 1635
+    },
+    {
+      "id": "T-APR-030",
+      "status": "passed",
+      "durationMs": 1577
+    },
+    {
+      "id": "T-APR-031",
+      "status": "passed",
+      "durationMs": 1509
+    },
+    {
+      "id": "T-BLK-001",
+      "status": "passed",
+      "durationMs": 2637
+    },
+    {
+      "id": "T-BLK-001b",
+      "status": "passed",
+      "durationMs": 3140
+    },
+    {
+      "id": "T-BLK-002",
+      "status": "passed",
+      "durationMs": 1042
+    },
+    {
+      "id": "T-BLK-003",
+      "status": "passed",
+      "durationMs": 1401
+    },
+    {
+      "id": "T-BLK-004",
+      "status": "passed",
+      "durationMs": 2299
+    },
+    {
+      "id": "T-BLK-005",
+      "status": "passed",
+      "durationMs": 1675
+    },
+    {
+      "id": "T-BLK-006",
+      "status": "passed",
+      "durationMs": 2442
+    },
+    {
+      "id": "T-BLK-007",
+      "status": "passed",
+      "durationMs": 2319
+    },
+    {
+      "id": "T-BLK-007b",
+      "status": "passed",
+      "durationMs": 1508
+    },
+    {
+      "id": "T-BLK-008",
+      "status": "passed",
+      "durationMs": 1306
+    },
+    {
+      "id": "T-BLK-009",
+      "status": "passed",
+      "durationMs": 1031
+    },
+    {
+      "id": "T-BLK-010",
+      "status": "passed",
+      "durationMs": 1399
+    },
+    {
+      "id": "T-BLK-011",
+      "status": "passed",
+      "durationMs": 3189
+    },
+    {
+      "id": "T-CLS-001a",
+      "status": "passed",
+      "durationMs": 3783
+    },
+    {
+      "id": "T-CLS-001b",
+      "status": "passed",
+      "durationMs": 2707
+    },
+    {
+      "id": "T-CLS-002a",
+      "status": "passed",
+      "durationMs": 2406
+    },
+    {
+      "id": "T-CLS-002b",
+      "status": "passed",
+      "durationMs": 2171
+    },
+    {
+      "id": "T-CLS-003",
+      "status": "passed",
+      "durationMs": 1902
+    },
+    {
+      "id": "T-CLS-004a",
+      "status": "passed",
+      "durationMs": 4232
+    },
+    {
+      "id": "T-CLS-004b",
+      "status": "passed",
+      "durationMs": 2862
+    },
+    {
+      "id": "T-CLS-005a",
+      "status": "passed",
+      "durationMs": 1699
+    },
+    {
+      "id": "T-CLS-005b",
+      "status": "passed",
+      "durationMs": 2313
+    },
+    {
+      "id": "T-CLS-006",
+      "status": "passed",
+      "durationMs": 2290
+    },
+    {
+      "id": "T-CLS-007",
+      "status": "passed",
+      "durationMs": 4776
+    },
+    {
+      "id": "T-IMP-001",
+      "status": "passed",
+      "durationMs": 5125
+    },
+    {
+      "id": "T-IMP-001b",
+      "status": "passed",
+      "durationMs": 2182
+    },
+    {
+      "id": "T-IMP-002",
+      "status": "passed",
+      "durationMs": 3220
+    },
+    {
+      "id": "T-IMP-003",
+      "status": "passed",
+      "durationMs": 2122
+    },
+    {
+      "id": "T-IMP-004",
+      "status": "passed",
+      "durationMs": 2557
+    },
+    {
+      "id": "T-IMP-005a",
+      "status": "passed",
+      "durationMs": 1876
+    },
+    {
+      "id": "T-IMP-005b",
+      "status": "passed",
+      "durationMs": 1580
+    },
+    {
+      "id": "T-IMP-006a",
+      "status": "passed",
+      "durationMs": 4277
+    },
+    {
+      "id": "T-IMP-006b",
+      "status": "passed",
+      "durationMs": 4506
+    },
+    {
+      "id": "T-IMP-006c",
+      "status": "passed",
+      "durationMs": 1340
+    },
+    {
+      "id": "T-IMP-007a",
+      "status": "passed",
+      "durationMs": 1324
+    },
+    {
+      "id": "T-IMP-007b",
+      "status": "passed",
+      "durationMs": 3293
+    },
+    {
+      "id": "T-IMP-008",
+      "status": "passed",
+      "durationMs": 4581
+    },
+    {
+      "id": "T-IMP-011a",
+      "status": "passed",
+      "durationMs": 1496
+    },
+    {
+      "id": "T-IMP-011b",
+      "status": "passed",
+      "durationMs": 1799
+    },
+    {
+      "id": "T-IMP-011c",
+      "status": "passed",
+      "durationMs": 1932
+    },
+    {
+      "id": "T-IMP-011d",
+      "status": "passed",
+      "durationMs": 1410
+    },
+    {
+      "id": "T-IMP-012",
+      "status": "passed",
+      "durationMs": 4726
+    },
+    {
+      "id": "T-IMP-013",
+      "status": "passed",
+      "durationMs": 1478
+    },
+    {
+      "id": "T-IMP-014a",
+      "status": "passed",
+      "durationMs": 1221
+    },
+    {
+      "id": "T-IMP-014b",
+      "status": "passed",
+      "durationMs": 1217
+    },
+    {
+      "id": "T-IMP-020a",
+      "status": "passed",
+      "durationMs": 1335
+    },
+    {
+      "id": "T-IMP-020b",
+      "status": "passed",
+      "durationMs": 1323
+    },
+    {
+      "id": "T-IMP-020c",
+      "status": "passed",
+      "durationMs": 1327
+    },
+    {
+      "id": "T-IMP-020d",
+      "status": "passed",
+      "durationMs": 1155
+    },
+    {
+      "id": "T-IMP-020e",
+      "status": "passed",
+      "durationMs": 1624
+    },
+    {
+      "id": "T-IMP-022a",
+      "status": "passed",
+      "durationMs": 1539
+    },
+    {
+      "id": "T-IMP-022b",
+      "status": "passed",
+      "durationMs": 1198
+    },
+    {
+      "id": "T-IMP-023",
+      "status": "passed",
+      "durationMs": 1251
+    },
+    {
+      "id": "T-IMP-024",
+      "status": "passed",
+      "durationMs": 6384
+    },
+    {
+      "id": "T-IMP-025a",
+      "status": "passed",
+      "durationMs": 3498
+    },
+    {
+      "id": "T-IMP-025b",
+      "status": "passed",
+      "durationMs": 6957
+    },
+    {
+      "id": "T-IMP-025c",
+      "status": "passed",
+      "durationMs": 7198
+    },
+    {
+      "id": "T-IMP-026",
+      "status": "passed",
+      "durationMs": 5573
+    },
+    {
+      "id": "T-IMP-027",
+      "status": "passed",
+      "durationMs": 4319
+    },
+    {
+      "id": "T-IMP-029",
+      "status": "passed",
+      "durationMs": 2159
+    },
+    {
+      "id": "T-IMP-033",
+      "status": "passed",
+      "durationMs": 4186
+    },
+    {
+      "id": "T-IMP-034",
+      "status": "passed",
+      "durationMs": 3564
+    },
+    {
+      "id": "T-LNK-001a",
+      "status": "passed",
+      "durationMs": 4856
+    },
+    {
+      "id": "T-LNK-001b",
+      "status": "passed",
+      "durationMs": 4608
+    },
+    {
+      "id": "T-LNK-001c",
+      "status": "passed",
+      "durationMs": 3360
+    },
+    {
+      "id": "T-LNK-001d",
+      "status": "passed",
+      "durationMs": 2293
+    },
+    {
+      "id": "T-LNK-002a",
+      "status": "passed",
+      "durationMs": 7760
+    },
+    {
+      "id": "T-LNK-003a",
+      "status": "passed",
+      "durationMs": 2468
+    },
+    {
+      "id": "T-LNK-003b",
+      "status": "passed",
+      "durationMs": 2875
+    },
+    {
+      "id": "T-LNK-003c",
+      "status": "passed",
+      "durationMs": 1874
+    },
+    {
+      "id": "T-LNK-003d",
+      "status": "passed",
+      "durationMs": 3569
+    },
+    {
+      "id": "T-LNK-004a",
+      "status": "passed",
+      "durationMs": 4811
+    },
+    {
+      "id": "T-LNK-005",
+      "status": "passed",
+      "durationMs": 2224
+    },
+    {
+      "id": "T-LNK-006",
+      "status": "passed",
+      "durationMs": 1605
+    },
+    {
+      "id": "T-MST-001a",
+      "status": "known-defect",
+      "durationMs": 2254,
+      "issue": 34
+    },
+    {
+      "id": "T-MST-001b",
+      "status": "passed",
+      "durationMs": 3845
+    },
+    {
+      "id": "T-MST-001c",
+      "status": "passed",
+      "durationMs": 2963
+    },
+    {
+      "id": "T-MST-001d",
+      "status": "passed",
+      "durationMs": 3052
+    },
+    {
+      "id": "T-MST-002",
+      "status": "passed",
+      "durationMs": 2645
+    },
+    {
+      "id": "T-MST-003a",
+      "status": "passed",
+      "durationMs": 1469
+    },
+    {
+      "id": "T-MST-003b",
+      "status": "passed",
+      "durationMs": 1546
+    },
+    {
+      "id": "T-MST-003c",
+      "status": "passed",
+      "durationMs": 1365
+    },
+    {
+      "id": "T-MST-003e",
+      "status": "known-defect",
+      "durationMs": 1205,
+      "issue": 34
+    },
+    {
+      "id": "T-MST-004",
+      "status": "passed",
+      "durationMs": 1128
+    },
+    {
+      "id": "T-MST-005a",
+      "status": "passed",
+      "durationMs": 961
+    },
+    {
+      "id": "T-MST-005b",
+      "status": "known-defect",
+      "durationMs": 946,
+      "issue": 34
+    },
+    {
+      "id": "T-MST-007",
+      "status": "passed",
+      "durationMs": 1041
+    },
+    {
+      "id": "T-MST-008",
+      "status": "passed",
+      "durationMs": 4620
+    },
+    {
+      "id": "T-MST-008b",
+      "status": "passed",
+      "durationMs": 1153
+    },
+    {
+      "id": "T-MST-009a",
+      "status": "known-defect",
+      "durationMs": 1315,
+      "issue": 34
+    },
+    {
+      "id": "T-MST-009b",
+      "status": "passed",
+      "durationMs": 2176
+    },
+    {
+      "id": "T-MST-009c",
+      "status": "passed",
+      "durationMs": 2332
+    },
+    {
+      "id": "T-MST-009d",
+      "status": "passed",
+      "durationMs": 1979
+    },
+    {
+      "id": "T-MST-009e",
+      "status": "passed",
+      "durationMs": 1840
+    },
+    {
+      "id": "T-MST-010",
+      "status": "passed",
+      "durationMs": 2372
+    },
+    {
+      "id": "T-MST-011",
+      "status": "passed",
+      "durationMs": 1218
+    },
+    {
+      "id": "T-MST-012",
+      "status": "passed",
+      "durationMs": 1475
+    },
+    {
+      "id": "T-MST-013",
+      "status": "passed",
+      "durationMs": 1928
+    },
+    {
+      "id": "T-MST-015",
+      "status": "passed",
+      "durationMs": 1524
+    },
+    {
+      "id": "T-MST-016",
+      "status": "passed",
+      "durationMs": 1550
+    }
+  ]
+}
