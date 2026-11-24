@@ -1,3 +1,4 @@
+import { LINK_CLOSURE_CASES } from "./links-closures.cases";
 import { MASTER_CASES } from "./masters.cases";
 import { BLOCK_CASES } from "./room-block.cases";
 import { RESERVATION_CASES } from "./reservation.cases";
@@ -12,4 +13,5 @@ export const ALL_CASES: readonly TestCase[] = [
   ...TIMETABLE_IMPORT_CASES,
   ...TIMETABLE_IMPORT_2_CASES,
   ...MASTER_CASES,
+  ...LINK_CLOSURE_CASES,
 ];
