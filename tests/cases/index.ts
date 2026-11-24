@@ -1,6 +1,7 @@
 import { ACCESS_CASES } from "./access.cases";
 import { DELETION_CASES } from "./deletion.cases";
 import { EXPORT_CASES } from "./export.cases";
+import { GATEWAY_CASES } from "./gateway.cases";
 import { LINK_CLOSURE_CASES } from "./links-closures.cases";
 import { MASTER_CASES } from "./masters.cases";
 import { BLOCK_CASES } from "./room-block.cases";
@@ -20,4 +21,5 @@ export const ALL_CASES: readonly TestCase[] = [
   ...EXPORT_CASES,
   ...ACCESS_CASES,
   ...DELETION_CASES,
+  ...GATEWAY_CASES,
 ];
