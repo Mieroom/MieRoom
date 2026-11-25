@@ -60,6 +60,55 @@ jobs:
       - run: npm ci
       - run: npm run test:integration
 
+  # カバレッジの測定 (テスト方針 段階 C): 単体と結合を測って合算し、表をジョブの要約に出す。
+  # いまは測るだけで、基準の数字による失敗は付けていない (現状の数字を見てから決める)。
+  # 既存の check・integration は変えずに、別のジョブにした (必須の確認の名前を変えないため)。
+  coverage:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: mieroom_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d mieroom_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://test:test@localhost:5432/mieroom_test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run test:coverage
+      - run: npm run test:integration:coverage
+      - name: 単体と結合を合算して、要約に出す
+        # shell: bash は pipefail つき。合算が失敗したのを、tee で隠さない。
+        shell: bash
+        run: |
+          {
+            echo "## カバレッジ (単体 + 結合の合算)"
+            echo '```'
+            npm run --silent coverage:merge
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: |
+            coverage/merged-summary.json
+            coverage/unit/coverage-final.json
+            coverage/integration/coverage-final.json
+          retention-days: 30
+
   # 脆弱性の検査 (テスト方針 段階 A): npm audit の高以上の指摘で失敗にする。
   # 修正版がないなどで通す指摘は、scripts/audit-gate.mjs の例外の一覧に、理由つきで書く。
   audit:
