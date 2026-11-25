@@ -61,7 +61,7 @@ jobs:
       - run: npm run test:integration
 
   # カバレッジの測定 (テスト方針 段階 C): 単体と結合を測って合算し、表をジョブの要約に出す。
-  # いまは測るだけで、基準の数字による失敗は付けていない (現状の数字を見てから決める)。
+  # 合算の数字が、下限 (scripts/coverage/floors.ts。2026-11-25 に決定) を下回ったら失敗にする。
   # 既存の check・integration は変えずに、別のジョブにした (必須の確認の名前を変えないため)。
   coverage:
     runs-on: ubuntu-latest
