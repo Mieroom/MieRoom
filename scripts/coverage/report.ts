@@ -4,11 +4,20 @@
 //
 // 読むのは、coverage/unit と coverage/integration の coverage-final.json。
 // 書くのは、coverage/merged-summary.json と、標準出力の表(通っていない文が多いファイルの順)。
-// 基準の数字による失敗は、まだ付けていない(現状の数字を見てから決める)。
+// 下限(floors.ts)を下回ったら、終了コード 1 で失敗にする。
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import {
+  FLOORS,
+  METRIC_LABEL,
+  checkFloors,
+  summarizeArea,
+  type Metric,
+} from "./floors";
 import { coverageFinalSchema, mergeCoverage, pct, type Counts } from "./merge";
+
+const METRICS: readonly Metric[] = ["statements", "branches", "functions"];
 
 const ROOT = process.cwd();
 const INPUTS = ["coverage/unit", "coverage/integration"];
@@ -50,6 +59,25 @@ function main() {
     console.log(
       `  ${r.file.padEnd(54)} 文 ${String(pct(r.s.statements)).padStart(6)}%  分岐 ${String(pct(r.s.branches)).padStart(6)}%  未通過の文 ${r.missing}`,
     );
+  }
+
+  console.log("\n下限(scripts/coverage/floors.ts)");
+  for (const floor of FLOORS) {
+    const a = summarizeArea(merged, floor.name, floor.prefix);
+    const cells = METRICS.map(
+      (m) => `${METRIC_LABEL[m]} ${pct(a.counts[m])}% (下限 ${floor.min[m]}%)`,
+    );
+    console.log(
+      `  ${floor.name.padEnd(12)} ${a.fileCount} ファイル  ${cells.join("  ")}`,
+    );
+  }
+  const problems = checkFloors(merged);
+  if (problems.length > 0) {
+    console.log("\n下限を下回っています");
+    for (const p of problems) console.log(`  ${p}`);
+    process.exitCode = 1;
+  } else {
+    console.log("\nすべての下限を満たしています");
   }
 }
 
