@@ -38,7 +38,6 @@ import {
   MonitorUrl,
 } from "./monitor-editors";
 import {
-  ReceiverAddForm,
   DeviceAssignForm,
   DeviceRemoveButton,
   ReceiverRemoveButton,
@@ -835,9 +834,8 @@ export function AccessView({
       )}
       <SectionHead
         title="受信機"
-        description="ゲートウェイが送る教室ID(roomId)を、教室に登録します。1つの受信機は1つの教室。1つの教室に複数置けます。登録のないIDは、位置に反映されません。"
+        description="受信機IDと教室の対応です。受信機は、下の「機器」を登録すると、自動で作られます(ここでは追加できません)。1つの受信機は1つの教室。1つの教室に複数置けます。要らなくなったものは「外す」で消せます。"
       />
-      <ReceiverAddForm rooms={rooms} />
       {receivers.length === 0 ? (
         <EmptyState title="受信機は登録されていません" />
       ) : (
