@@ -7,6 +7,11 @@ import type {
 } from "@/components/screens/admin-views";
 import type { ImportCell, ImportRow } from "@/components/screens/import-view";
 import {
+  UNREGISTERED_MAX,
+  UNREGISTERED_TTL_MS,
+  isNoResponse,
+} from "@/lib/domain/device";
+import {
   addMonths,
   dateColumnToText,
   fiscalYearOfDate,
@@ -342,6 +347,68 @@ export async function loadAccess() {
       receiverId: row.receiverId,
       room: row.room.name,
     })),
+  };
+}
+
+/**
+ * S25 機器 (外部設計書 14-17): the devices the relay has seen. 登録済み ones with the room of their
+ * 受信機ID; 未登録 ones (newest first) while they are fresh (10 minutes), at most 50. The times are
+ * text in the school's time, so that the screen needs no clock of its own.
+ */
+export async function loadDevices(now: Date) {
+  const db = getDb();
+  const [registered, unregistered, receivers] = await Promise.all([
+    db.device.findMany({
+      where: { receiverId: { not: null } },
+      select: {
+        id: true,
+        espMac: true,
+        lastSeenAt: true,
+        receiver: {
+          select: {
+            receiverId: true,
+            room: { select: { id: true, name: true } },
+          },
+        },
+      },
+      orderBy: [{ receiver: { receiverId: "asc" } }, { espMac: "asc" }],
+    }),
+    db.device.findMany({
+      where: {
+        receiverId: null,
+        lastSeenAt: { gte: new Date(now.getTime() - UNREGISTERED_TTL_MS) },
+      },
+      select: { id: true, espMac: true, lastSeenAt: true },
+      orderBy: [{ createdAt: "desc" }, { espMac: "asc" }],
+      take: UNREGISTERED_MAX,
+    }),
+    db.receiver.findMany({
+      select: { receiverId: true, roomId: true },
+      orderBy: { receiverId: "asc" },
+    }),
+  ]);
+  return {
+    registered: registered.flatMap((row) =>
+      row.receiver === null
+        ? []
+        : [
+            {
+              id: row.id,
+              espMac: row.espMac,
+              receiverId: row.receiver.receiverId,
+              roomId: row.receiver.room.id,
+              room: row.receiver.room.name,
+              lastSeen: schoolDateTimeText(row.lastSeenAt),
+              noResponse: isNoResponse(row.lastSeenAt, now),
+            },
+          ],
+    ),
+    unregistered: unregistered.map((row) => ({
+      id: row.id,
+      espMac: row.espMac,
+      lastSeen: schoolDateTimeText(row.lastSeenAt),
+    })),
+    receivers,
   };
 }
 

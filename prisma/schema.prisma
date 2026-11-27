@@ -219,9 +219,28 @@ model Receiver {
   updatedAt  DateTime @updatedAt
 
   // 教室を消すと、受信機の登録も消える (R5-7)。
-  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  room    Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  devices Device[]
 
   @@map("receivers")
+}
+
+// E21 機器 (教室側の ESP32)。外部設計書 14-17。親機が出す送信元の MAC (espMac) で見分ける。
+// 機器には何も書き込まない。どの教室の機器かは、この表の receiverId で決める (S25 の「機器」)。
+// receiverId が null のものは「未登録」: 中継が見た機器の一覧で、10 分来なければ消す。
+// 受信機を外す・教室を消すと、機器は自動で未登録に戻る。
+model Device {
+  id         String   @id @default(uuid()) @db.Uuid
+  espMac     String   @unique @db.VarChar(17) // "AA:BB:CC:DD:EE:FF" (大文字・コロン区切り)
+  receiverId String?  @db.Uuid
+  lastSeenAt DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  receiver Receiver? @relation(fields: [receiverId], references: [id], onDelete: SetNull)
+
+  @@index([receiverId])
+  @@map("devices")
 }
 
 // E07 クラスの教科
