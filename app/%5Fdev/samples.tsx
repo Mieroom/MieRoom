@@ -941,6 +941,36 @@ export function sampleFor(
               active: true,
             }))}
             rooms={ROOMS.map((room) => ({ id: room.id, name: room.name }))}
+            devices={{
+              registered: [
+                {
+                  id: "d1",
+                  espMac: "02:00:00:00:00:A1",
+                  receiverId: "304",
+                  roomId: ROOMS[0].id,
+                  room: ROOMS[0].name,
+                  lastSeen: "2026-11-10 09:59",
+                  noResponse: false,
+                },
+                {
+                  id: "d2",
+                  espMac: "02:00:00:00:00:B2",
+                  receiverId: "304",
+                  roomId: ROOMS[0].id,
+                  room: ROOMS[0].name,
+                  lastSeen: "2026-11-10 09:40",
+                  noResponse: true,
+                },
+              ],
+              unregistered: [
+                {
+                  id: "d3",
+                  espMac: "02:00:00:00:00:C3",
+                  lastSeen: "2026-11-10 09:59",
+                },
+              ],
+              receivers: [{ receiverId: "304", roomId: ROOMS[0].id }],
+            }}
           />
         ),
       };

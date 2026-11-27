@@ -44,6 +44,8 @@ import { POST as closureDelete } from "@/app/(main)/admin/closures/delete/route"
 import { POST as accessTag } from "@/app/(main)/admin/access/tag/route";
 import { POST as accessReceiver } from "@/app/(main)/admin/access/receiver/route";
 import { POST as accessReceiverRemove } from "@/app/(main)/admin/access/receiver/remove/route";
+import { POST as accessDevice } from "@/app/(main)/admin/access/device/route";
+import { POST as accessDeviceRemove } from "@/app/(main)/admin/access/device/remove/route";
 import { POST as deleteRun } from "@/app/(main)/admin/delete/run/route";
 import { POST as monitorAdd } from "@/app/(main)/admin/monitors/add/route";
 import { POST as monitorRotate } from "@/app/(main)/admin/monitors/rotate/route";
@@ -74,6 +76,8 @@ const ROUTES: [string, Need, Handler][] = [
   ["/admin/access/tag", "admin", accessTag],
   ["/admin/access/receiver", "admin", accessReceiver],
   ["/admin/access/receiver/remove", "admin", accessReceiverRemove],
+  ["/admin/access/device", "admin", accessDevice],
+  ["/admin/access/device/remove", "admin", accessDeviceRemove],
   ["/admin/delete/run", "admin", deleteRun],
   ["/admin/monitors/add", "admin", monitorAdd],
   ["/admin/monitors/rotate", "admin", monitorRotate],

@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ConfirmButton } from "@/components/ui/confirm-button";
 import { fieldClass } from "@/components/ui/form";
 import { MESSAGES, SYSTEM_ERROR_MESSAGE } from "@/lib/messages";
 
@@ -197,6 +198,132 @@ export function ReceiverAddForm({
         </span>
       )}
     </form>
+  );
+}
+
+// 機器 (教室側の ESP32) を、教室の受信機ID に結びつける。登録も、付け替えも、同じ操作 (14-17)。
+// 受信機ID は、選んだ教室にすでにあるものから選ぶか、新しく入力する (新しい ID は、S25 の受信機にも登録される)。
+export function DeviceAssignForm({
+  id,
+  rooms,
+  receivers,
+  current,
+  submitLabel,
+}: {
+  id: string;
+  rooms: { id: string; name: string }[];
+  receivers: { receiverId: string; roomId: string }[];
+  /** 登録済みの機器を付け替えるときの、いまの教室と受信機ID */
+  current?: { roomId: string; receiverId: string };
+  submitLabel: string;
+}) {
+  const done = useDone();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [roomId, setRoomId] = useState(current?.roomId ?? "");
+  const [receiverId, setReceiverId] = useState(current?.receiverId ?? "");
+  const listId = `receivers-of-${id}`;
+  const unchanged =
+    current !== undefined &&
+    roomId === current.roomId &&
+    receiverId.trim() === current.receiverId;
+
+  return (
+    <form
+      className="flex flex-wrap items-end gap-2"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (busy) return;
+        setBusy(true);
+        setError(null);
+        const answer = await send("/admin/access/device", {
+          id,
+          roomId,
+          receiverId,
+        });
+        setBusy(false);
+        if (answer.ok) done(answer.notice);
+        else setError(answer.message);
+      }}
+    >
+      <select
+        aria-label="教室"
+        value={roomId}
+        onChange={(event) => setRoomId(event.target.value)}
+        required
+        className={`${fieldClass} h-[34px] w-[150px]`}
+      >
+        <option value="" disabled>
+          教室を選ぶ
+        </option>
+        {rooms.map((room) => (
+          <option key={room.id} value={room.id}>
+            {room.name}
+          </option>
+        ))}
+      </select>
+      <input
+        aria-label="受信機ID"
+        list={listId}
+        value={receiverId}
+        onChange={(event) => setReceiverId(event.target.value)}
+        autoComplete="off"
+        required
+        className={inputClass}
+        placeholder="受信機ID(例: 304)"
+      />
+      <datalist id={listId}>
+        {receivers
+          .filter((receiver) => receiver.roomId === roomId)
+          .map((receiver) => (
+            <option key={receiver.receiverId} value={receiver.receiverId} />
+          ))}
+      </datalist>
+      <Button
+        type="submit"
+        size="sm"
+        variant="primary"
+        disabled={busy || unchanged || roomId === ""}
+      >
+        {submitLabel}
+      </Button>
+      {error && (
+        <span role="alert" className="basis-full text-[11px] text-red-ink">
+          {error}
+        </span>
+      )}
+    </form>
+  );
+}
+
+// 機器を外す(行を消す)。heartbeat が続けば、また「未登録」に現れる。確認の窓(MC506)を出す。
+export function DeviceRemoveButton({
+  id,
+  registered,
+}: {
+  id: string;
+  registered: boolean;
+}) {
+  const done = useDone();
+  const router = useRouter();
+  return (
+    <ConfirmButton
+      size="sm"
+      variant="danger"
+      message={registered ? MESSAGES.MC506 : MESSAGES.MC506unregistered}
+      confirmLabel="外す"
+      onConfirm={async () => {
+        const answer = await send("/admin/access/device/remove", { id });
+        if (answer.ok) {
+          done(answer.notice);
+          return null;
+        }
+        router.refresh();
+        return answer.message ?? SYSTEM_ERROR_MESSAGE;
+      }}
+    >
+      外す
+    </ConfirmButton>
   );
 }
 

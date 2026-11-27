@@ -39,6 +39,8 @@ import {
 } from "./monitor-editors";
 import {
   ReceiverAddForm,
+  DeviceAssignForm,
+  DeviceRemoveButton,
   ReceiverRemoveButton,
   TagEditor,
 } from "./access-editors";
@@ -795,6 +797,7 @@ export function AccessView({
   teachers,
   receivers,
   rooms,
+  devices,
   notice,
 }: {
   teachers: {
@@ -805,6 +808,20 @@ export function AccessView({
   }[];
   receivers: { id: string; receiverId: string; room: string }[];
   rooms: { id: string; name: string }[];
+  /** 機器 (14-17): 中継が見た、教室側の ESP32 */
+  devices: {
+    registered: {
+      id: string;
+      espMac: string;
+      receiverId: string;
+      roomId: string;
+      room: string;
+      lastSeen: string;
+      noResponse: boolean;
+    }[];
+    unregistered: { id: string; espMac: string; lastSeen: string }[];
+    receivers: { receiverId: string; roomId: string }[];
+  };
   /** MI501: what was just done */
   notice?: string | null;
 }) {
@@ -841,6 +858,96 @@ export function AccessView({
                 <Td>{row.room}</Td>
                 <Td>
                   <ReceiverRemoveButton id={row.id} />
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </TableWrap>
+      )}
+      <SectionHead
+        title="機器"
+        description="教室に置いた ESP32(機器)を、教室の受信機IDに結びつけます。機器には何も書き込みません。登録・付け替え・外すは、中継が次に受け取ったとき(最大1分後)から効きます。登録のない機器の検知は、位置に反映されません。"
+      />
+      <h3 className="mb-2 text-xs font-semibold">未登録の機器</h3>
+      {devices.unregistered.length === 0 ? (
+        <EmptyState title="未登録の機器は、見つかっていません">
+          機器の電源を入れてから、1分ほどで、ここに出ます(10分、何も届かないと消えます)。電源を入れた直後に現れた機器を選んでください。
+        </EmptyState>
+      ) : (
+        <TableWrap>
+          <thead>
+            <tr>
+              <Th>機器(MAC)</Th>
+              <Th>最後に確認</Th>
+              <Th>登録</Th>
+              <Th>操作</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {devices.unregistered.map((row) => (
+              <tr key={row.id}>
+                <Td>
+                  <strong>{row.espMac}</strong>
+                </Td>
+                <Td>{row.lastSeen}</Td>
+                <Td>
+                  <DeviceAssignForm
+                    id={row.id}
+                    rooms={rooms}
+                    receivers={devices.receivers}
+                    submitLabel="登録する"
+                  />
+                </Td>
+                <Td>
+                  <DeviceRemoveButton id={row.id} registered={false} />
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </TableWrap>
+      )}
+      <h3 className="mb-2 mt-5 text-xs font-semibold">登録済みの機器</h3>
+      {devices.registered.length === 0 ? (
+        <EmptyState title="登録済みの機器は、ありません" />
+      ) : (
+        <TableWrap>
+          <thead>
+            <tr>
+              <Th>機器(MAC)</Th>
+              <Th>教室</Th>
+              <Th>受信機ID</Th>
+              <Th>最後に確認</Th>
+              <Th>付け替え</Th>
+              <Th>操作</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {devices.registered.map((row) => (
+              <tr key={row.id}>
+                <Td>
+                  <strong>{row.espMac}</strong>
+                </Td>
+                <Td>{row.room}</Td>
+                <Td>{row.receiverId}</Td>
+                <Td>
+                  {row.lastSeen}
+                  {row.noResponse && (
+                    <Badge kind="warning" className="ml-2">
+                      応答なし
+                    </Badge>
+                  )}
+                </Td>
+                <Td>
+                  <DeviceAssignForm
+                    id={row.id}
+                    rooms={rooms}
+                    receivers={devices.receivers}
+                    current={{ roomId: row.roomId, receiverId: row.receiverId }}
+                    submitLabel="付け替える"
+                  />
+                </Td>
+                <Td>
+                  <DeviceRemoveButton id={row.id} registered />
                 </Td>
               </tr>
             ))}
