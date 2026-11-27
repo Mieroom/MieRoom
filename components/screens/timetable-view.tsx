@@ -4,9 +4,9 @@ import {
   MyClassSelect,
   type ClassOption,
 } from "@/components/shell/my-class-select";
-import { AutoSubmitInput, AutoSubmitSelect } from "@/components/ui/auto-submit";
+import { AutoSubmitSelect } from "@/components/ui/auto-submit";
 import { LinkButton } from "@/components/ui/button";
-import { filterFieldClass, filterSelectClass } from "@/components/ui/form";
+import { filterSelectClass } from "@/components/ui/form";
 import { Icon } from "@/components/ui/icon";
 import {
   Badge,
@@ -661,7 +661,7 @@ export function TimetableView({
   /** The day or the month on screen. */
   const shown = isDay ? formatLongDate(date) : formatMonth(month);
   const closures = isDay ? (days[0]?.closures ?? []) : [];
-  // Phones: a full row each (the day or month with 前・次, then 日付・講師, 週の始まり,
+  // Phones: a full row each (the day or month with 前・次, then 講師, 週の始まり,
   // 自分のクラス). From sm the groups sit inline and wrap.
   const group = "w-full sm:w-auto print:hidden";
   const step = "flex-1 sm:flex-none";
@@ -718,7 +718,7 @@ export function TimetableView({
         </div>
         <Form
           action={basePath}
-          className={`grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-2.5 ${group}`}
+          className={`flex items-center gap-2 sm:gap-2.5 ${group}`}
         >
           {isDay && <input type="hidden" name="view" value="day" />}
           {selectedClassId && !selectedTeacherId && (
@@ -727,14 +727,9 @@ export function TimetableView({
           {weekStart === "sun" && (
             <input type="hidden" name="start" value="sun" />
           )}
-          <AutoSubmitInput
-            key={date}
-            type="date"
-            name="date"
-            defaultValue={date}
-            aria-label={isDay ? "表示する日" : "表示する月(日付で選ぶ)"}
-            className={`${filterFieldClass} w-full min-w-0 sm:w-auto`}
-          />
+          {/* The day or month on screen stays when the teacher changes. It is chosen with
+              前・次 and the dates of the month, not typed in. */}
+          <input type="hidden" name="date" value={date} />
           <AutoSubmitSelect
             key={selectedTeacherId ?? "none"}
             className={`${filterSelectClass} w-full min-w-0 sm:w-auto`}

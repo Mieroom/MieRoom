@@ -99,11 +99,19 @@ function HandledCell({ row }: { row: ReservationRow }) {
   );
 }
 
+// 備考 is free text of up to 100 characters. It wraps inside its cell (also in the middle
+// of a long word or URL), so that a long one never makes the table scroll sideways.
+const PURPOSE_TD = "min-w-[180px] whitespace-normal";
+
 function PurposeCell({ row }: { row: ReservationRow }) {
   return (
     <>
       {row.purpose}
-      {row.note && <SubText>{row.note}</SubText>}
+      {row.note && (
+        <span className="[overflow-wrap:anywhere]">
+          <SubText>{row.note}</SubText>
+        </span>
+      )}
     </>
   );
 }
@@ -260,7 +268,7 @@ export function MyReservationsView({
                     <Td>
                       <SlotSummary row={row} />
                     </Td>
-                    <Td>
+                    <Td className={PURPOSE_TD}>
                       <PurposeCell row={row} />
                     </Td>
                     <Td>
@@ -354,7 +362,7 @@ function ReviewTable({
                 <Td>
                   <SlotSummary row={row} />
                 </Td>
-                <Td>
+                <Td className={PURPOSE_TD}>
                   <PurposeCell row={row} />
                 </Td>
                 {showHandled ? (
