@@ -753,10 +753,7 @@ export function ExportView({
           </TableWrap>
         </div>
       )}
-      <SectionHead
-        title="書き出すファイル"
-        description="エラーがなければ、この8つがZIPに入ります。"
-      />
+      <SectionHead title="書き出すファイル" />
       <TableWrap>
         <thead>
           <tr>
@@ -829,15 +826,10 @@ export function AccessView({
           {notice}
         </Callout>
       )}
-      <SectionHead
-        title="機器"
-        description="教室に置いた ESP32(機器)を、教室の受信機IDに結びつけます。機器には何も書き込みません。受信機は、機器を登録すると自動で作られ、ほかに使う機器がなくなると(外す・付け替える)自動で消えます。登録・付け替え・外すは、中継が次に受け取ったとき(最大1分後)から効きます。登録のない機器の検知は、位置に反映されません。"
-      />
+      <SectionHead title="機器" />
       <h3 className="mb-2 text-xs font-semibold">未登録の機器</h3>
       {devices.unregistered.length === 0 ? (
-        <EmptyState title="未登録の機器は、見つかっていません">
-          機器の電源を入れてから、1分ほどで、ここに出ます(10分、何も届かないと消えます)。電源を入れた直後に現れた機器を選んでください。
-        </EmptyState>
+        <EmptyState title="未登録の機器は、見つかっていません" />
       ) : (
         <TableWrap>
           <thead>
@@ -919,10 +911,7 @@ export function AccessView({
           </tbody>
         </TableWrap>
       )}
-      <SectionHead
-        title="タグ"
-        description="ビーコンの minor(0〜65535の数字)を登録します。登録のない講師は「位置情報なし」と出ます。変えたり外したりすると、その講師のいまの位置は消えます。"
-      />
+      <SectionHead title="タグ" />
       <TableWrap>
         <thead>
           <tr>
