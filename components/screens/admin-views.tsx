@@ -38,10 +38,8 @@ import {
   MonitorUrl,
 } from "./monitor-editors";
 import {
-  ReceiverAddForm,
   DeviceAssignForm,
   DeviceRemoveButton,
-  ReceiverRemoveButton,
   TagEditor,
 } from "./access-editors";
 import type { RoomKind } from "@/lib/domain/room-status";
@@ -755,10 +753,7 @@ export function ExportView({
           </TableWrap>
         </div>
       )}
-      <SectionHead
-        title="書き出すファイル"
-        description="エラーがなければ、この8つがZIPに入ります。"
-      />
+      <SectionHead title="書き出すファイル" />
       <TableWrap>
         <thead>
           <tr>
@@ -795,7 +790,6 @@ export function ExportView({
 // S25 タグ・受信機
 export function AccessView({
   teachers,
-  receivers,
   rooms,
   devices,
   notice,
@@ -806,7 +800,6 @@ export function AccessView({
     tagId: string | null;
     active: boolean;
   }[];
-  receivers: { id: string; receiverId: string; room: string }[];
   rooms: { id: string; name: string }[];
   /** 機器 (14-17): 中継が見た、教室側の ESP32 */
   devices: {
@@ -833,46 +826,10 @@ export function AccessView({
           {notice}
         </Callout>
       )}
-      <SectionHead
-        title="受信機"
-        description="ゲートウェイが送る教室ID(roomId)を、教室に登録します。1つの受信機は1つの教室。1つの教室に複数置けます。登録のないIDは、位置に反映されません。"
-      />
-      <ReceiverAddForm rooms={rooms} />
-      {receivers.length === 0 ? (
-        <EmptyState title="受信機は登録されていません" />
-      ) : (
-        <TableWrap>
-          <thead>
-            <tr>
-              <Th>受信機ID</Th>
-              <Th>教室</Th>
-              <Th>操作</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {receivers.map((row) => (
-              <tr key={row.id}>
-                <Td>
-                  <strong>{row.receiverId}</strong>
-                </Td>
-                <Td>{row.room}</Td>
-                <Td>
-                  <ReceiverRemoveButton id={row.id} />
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </TableWrap>
-      )}
-      <SectionHead
-        title="機器"
-        description="教室に置いた ESP32(機器)を、教室の受信機IDに結びつけます。機器には何も書き込みません。登録・付け替え・外すは、中継が次に受け取ったとき(最大1分後)から効きます。登録のない機器の検知は、位置に反映されません。"
-      />
+      <SectionHead title="機器" />
       <h3 className="mb-2 text-xs font-semibold">未登録の機器</h3>
       {devices.unregistered.length === 0 ? (
-        <EmptyState title="未登録の機器は、見つかっていません">
-          機器の電源を入れてから、1分ほどで、ここに出ます(10分、何も届かないと消えます)。電源を入れた直後に現れた機器を選んでください。
-        </EmptyState>
+        <EmptyState title="未登録の機器は、見つかっていません" />
       ) : (
         <TableWrap>
           <thead>
@@ -954,10 +911,7 @@ export function AccessView({
           </tbody>
         </TableWrap>
       )}
-      <SectionHead
-        title="タグ"
-        description="ビーコンの minor(0〜65535の数字)を登録します。登録のない講師は「位置情報なし」と出ます。変えたり外したりすると、その講師のいまの位置は消えます。"
-      />
+      <SectionHead title="タグ" />
       <TableWrap>
         <thead>
           <tr>

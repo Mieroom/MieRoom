@@ -139,7 +139,10 @@ export async function assignDevice(
   try {
     return await getDb().$transaction(async (tx): Promise<DeviceResult> => {
       const [device, room, receiver] = await Promise.all([
-        tx.device.findUnique({ where: { id }, select: { id: true } }),
+        tx.device.findUnique({
+          where: { id },
+          select: { id: true, receiverId: true },
+        }),
         tx.room.findFirst({
           where: { id: roomId, active: true },
           select: { id: true },
@@ -166,6 +169,10 @@ export async function assignDevice(
         data: { receiverId: receiverRowId },
       });
       if (updated.count !== 1) return { kind: "not_found" };
+      // 付け替えで使われなくなった古い受信機は、同じ操作の中で消す。
+      if (device.receiverId !== null && device.receiverId !== receiverRowId) {
+        await removeUnusedReceiver(tx, device.receiverId);
+      }
       return { kind: "done", notice: "MI501" };
     });
   } catch (error) {
@@ -175,11 +182,36 @@ export async function assignDevice(
   }
 }
 
-/** 機器の行を消す。heartbeat が続けば、中継の次の送信で、また未登録として現れる。 */
+/**
+ * ほかの機器が結びついていない受信機だけを消す (1 つの教室に機器が 2 台あれば、残す)。
+ * 受信機を作るのは機器の登録だけなので、機器がなくなった受信機は、ここで消えるようにする。
+ */
+async function removeUnusedReceiver(
+  tx: Pick<ReturnType<typeof getDb>, "receiver">,
+  receiverRowId: string,
+) {
+  await tx.receiver.deleteMany({
+    where: { id: receiverRowId, devices: { none: {} } },
+  });
+}
+
+/**
+ * 機器の行を消す。結びついていた受信機に、ほかの機器がなければ、受信機も同じ操作で消す。
+ * heartbeat が続けば、中継の次の送信で、また未登録として現れる。
+ */
 export async function removeDevice(id: unknown): Promise<DeviceResult> {
   if (typeof id !== "string" || !UUID.test(id)) return { kind: "not_found" };
-  const removed = await getDb().device.deleteMany({ where: { id } });
-  return removed.count === 1
-    ? { kind: "done", notice: "MI501" }
-    : { kind: "not_found" };
+  return getDb().$transaction(async (tx): Promise<DeviceResult> => {
+    const device = await tx.device.findUnique({
+      where: { id },
+      select: { receiverId: true },
+    });
+    if (device === null) return { kind: "not_found" };
+    const removed = await tx.device.deleteMany({ where: { id } });
+    if (removed.count !== 1) return { kind: "not_found" };
+    if (device.receiverId !== null) {
+      await removeUnusedReceiver(tx, device.receiverId);
+    }
+    return { kind: "done", notice: "MI501" };
+  });
 }
