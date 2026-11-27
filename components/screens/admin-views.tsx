@@ -40,7 +40,6 @@ import {
 import {
   DeviceAssignForm,
   DeviceRemoveButton,
-  ReceiverRemoveButton,
   TagEditor,
 } from "./access-editors";
 import type { RoomKind } from "@/lib/domain/room-status";
@@ -794,7 +793,6 @@ export function ExportView({
 // S25 タグ・受信機
 export function AccessView({
   teachers,
-  receivers,
   rooms,
   devices,
   notice,
@@ -805,7 +803,6 @@ export function AccessView({
     tagId: string | null;
     active: boolean;
   }[];
-  receivers: { id: string; receiverId: string; room: string }[];
   rooms: { id: string; name: string }[];
   /** 機器 (14-17): 中継が見た、教室側の ESP32 */
   devices: {
@@ -833,38 +830,8 @@ export function AccessView({
         </Callout>
       )}
       <SectionHead
-        title="受信機"
-        description="受信機IDと教室の対応です。受信機は、下の「機器」を登録すると、自動で作られます(ここでは追加できません)。1つの受信機は1つの教室。1つの教室に複数置けます。要らなくなったものは「外す」で消せます。"
-      />
-      {receivers.length === 0 ? (
-        <EmptyState title="受信機は登録されていません" />
-      ) : (
-        <TableWrap>
-          <thead>
-            <tr>
-              <Th>受信機ID</Th>
-              <Th>教室</Th>
-              <Th>操作</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {receivers.map((row) => (
-              <tr key={row.id}>
-                <Td>
-                  <strong>{row.receiverId}</strong>
-                </Td>
-                <Td>{row.room}</Td>
-                <Td>
-                  <ReceiverRemoveButton id={row.id} />
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </TableWrap>
-      )}
-      <SectionHead
         title="機器"
-        description="教室に置いた ESP32(機器)を、教室の受信機IDに結びつけます。機器には何も書き込みません。登録・付け替え・外すは、中継が次に受け取ったとき(最大1分後)から効きます。登録のない機器の検知は、位置に反映されません。"
+        description="教室に置いた ESP32(機器)を、教室の受信機IDに結びつけます。機器には何も書き込みません。受信機は、機器を登録すると自動で作られ、ほかに使う機器がなくなると(外す・付け替える)自動で消えます。登録・付け替え・外すは、中継が次に受け取ったとき(最大1分後)から効きます。登録のない機器の検知は、位置に反映されません。"
       />
       <h3 className="mb-2 text-xs font-semibold">未登録の機器</h3>
       {devices.unregistered.length === 0 ? (

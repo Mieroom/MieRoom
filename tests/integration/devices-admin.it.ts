@@ -194,18 +194,27 @@ describe("登録(未登録の機器を、教室の受信機ID に結びつける
 });
 
 describe("付け替え(登録済みの機器を、別の受信機ID に結びつけ直す)", () => {
-  it("T-DEV-025 別の教室の受信機ID に付け替えられる。元の受信機は、S25 に残る(外すかどうかは別の操作)", async () => {
+  it("T-DEV-025 別の教室の受信機ID に付け替えられる。ほかの機器がない元の受信機は、同じ操作で消える。同じ結びつけの繰り返しは、同じ結果", async () => {
     expect((await assign(DEVICE.a, ID.roomFree, "304")).status).toBe(200);
     const moved = await assign(DEVICE.a, ID.roomHome, "305");
     expect(moved).toEqual({ status: 200, body: { notice: "MI501" } });
     expect(await receiverTextOf(DEVICE.a)).toBe("305");
-    const old = await db().receiver.findUnique({
-      where: { receiverId: "304" },
-    });
-    expect(old?.roomId).toBe(ID.roomFree);
-    // 同じ結びつけをもう一度しても、同じ結果(受信機は増えない)
+    expect(
+      await db().receiver.findUnique({ where: { receiverId: "304" } }),
+    ).toBeNull(); // 使われなくなったので消えた
+    // 同じ結びつけをもう一度しても、同じ結果(受信機は消えず、増えない)
     expect((await assign(DEVICE.a, ID.roomHome, "305")).status).toBe(200);
-    expect(await receiverCount()).toBe(2);
+    expect(await receiverTextOf(DEVICE.a)).toBe("305");
+    expect(await receiverCount()).toBe(1);
+  });
+
+  it("T-DEV-032 付け替えても、ほかの機器がまだ使っている元の受信機は、消えない", async () => {
+    expect((await assign(DEVICE.a, ID.roomFree, "304")).status).toBe(200);
+    expect((await assign(DEVICE.b, ID.roomFree, "304")).status).toBe(200);
+    expect((await assign(DEVICE.a, ID.roomHome, "305")).status).toBe(200);
+    expect(await receiverTextOf(DEVICE.a)).toBe("305");
+    expect(await receiverTextOf(DEVICE.b)).toBe("304"); // もう 1 台は、そのまま
+    expect(await receiverCount()).toBe(2); // 「304」は残り、「305」が増えた
   });
 });
 
@@ -256,13 +265,13 @@ describe("見つからない・形の違う本文", () => {
 });
 
 describe("外す", () => {
-  it("T-DEV-029 機器の行を消す(MI501)。もう一度外すと 404 と ME902。ほかの機器・受信機は変わらない", async () => {
+  it("T-DEV-029 機器の行を消す(MI501)。使われなくなった受信機も、同じ操作で消える。もう一度外すと 404 と ME902。ほかの機器は変わらない", async () => {
     expect((await assign(DEVICE.a, ID.roomFree, "304")).status).toBe(200);
     const removed = await remove(DEVICE.a);
     expect(removed).toEqual({ status: 200, body: { notice: "MI501" } });
     expect(await deviceOf(DEVICE.a)).toBeNull();
     expect(await deviceOf(DEVICE.b)).not.toBeNull();
-    expect(await receiverCount()).toBe(1);
+    expect(await receiverCount()).toBe(0); // 受信機「304」は、ほかに使う機器がなく、消えた
     const again = await remove(DEVICE.a);
     expect(again).toEqual({ status: 404, body: { message: MESSAGES.ME902 } });
     refused(await remove("not-a-uuid"));
@@ -286,6 +295,28 @@ describe("外す", () => {
     });
     expect(back.receiverId).toBeNull();
     expect(back.id).not.toBe(DEVICE.a); // 新しい行
+  });
+});
+
+describe("外す(同じ受信機を、2 台が使っているとき)", () => {
+  it("T-DEV-033 同じ受信機の 2 台のうち 1 台を外しても、受信機は残る。最後の 1 台を外すと消える。結びついていない機器を外しても、受信機は消えない", async () => {
+    expect((await assign(DEVICE.a, ID.roomFree, "304")).status).toBe(200);
+    expect((await assign(DEVICE.b, ID.roomFree, "304")).status).toBe(200);
+    expect((await remove(DEVICE.a)).status).toBe(200);
+    expect(await receiverCount()).toBe(1); // もう 1 台が使っている
+    expect(await receiverTextOf(DEVICE.b)).toBe("304");
+    expect((await remove(DEVICE.b)).status).toBe(200);
+    expect(await receiverCount()).toBe(0); // 最後の 1 台が外れた
+
+    // 未登録の機器を外しても、受信機(別の機器が使っているもの)は消えない
+    await db().device.create({
+      data: { id: DEVICE.a, espMac: MAC.a, lastSeenAt: new Date(NOW_MS) },
+    });
+    await db().receiver.create({
+      data: { receiverId: "312", roomId: ID.roomFree },
+    });
+    expect((await remove(DEVICE.a)).status).toBe(200);
+    expect(await receiverCount()).toBe(1); // 機器のない受信機「312」は、そのまま
   });
 });
 

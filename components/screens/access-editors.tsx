@@ -253,37 +253,3 @@ export function DeviceRemoveButton({
     </ConfirmButton>
   );
 }
-
-export function ReceiverRemoveButton({ id }: { id: string }) {
-  const done = useDone();
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <span className="inline-flex flex-col items-start gap-1">
-      <Button
-        size="sm"
-        variant="danger"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          setError(null);
-          const answer = await send("/admin/access/receiver/remove", { id });
-          setBusy(false);
-          if (answer.ok) done(answer.notice);
-          else {
-            setError(answer.message);
-            router.refresh();
-          }
-        }}
-      >
-        外す
-      </Button>
-      {error && (
-        <span role="alert" className="text-[11px] text-red-ink">
-          {error}
-        </span>
-      )}
-    </span>
-  );
-}

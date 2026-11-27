@@ -934,7 +934,6 @@ export function sampleFor(
         menuId: "s25",
         element: (
           <AccessView
-            receivers={[{ id: "1", receiverId: "304", room: "304" }]}
             teachers={TEACHERS.map((item, index) => ({
               ...item,
               tagId: index === 5 ? "12" : null,

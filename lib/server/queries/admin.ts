@@ -319,33 +319,18 @@ export async function loadImportRows(
 
 export async function loadAccess() {
   const db = getDb();
-  const [teachers, receivers] = await Promise.all([
-    // Every active teacher, and an inactive one that still holds a tag (it blocks the number).
-    db.teacher.findMany({
-      where: { OR: [{ active: true }, { tagId: { not: null } }] },
-      select: { id: true, displayName: true, tagId: true, active: true },
-      orderBy: { displayName: "asc" },
-    }),
-    db.receiver.findMany({
-      select: {
-        id: true,
-        receiverId: true,
-        room: { select: { name: true } },
-      },
-      orderBy: { receiverId: "asc" },
-    }),
-  ]);
+  // Every active teacher, and an inactive one that still holds a tag (it blocks the number).
+  const teachers = await db.teacher.findMany({
+    where: { OR: [{ active: true }, { tagId: { not: null } }] },
+    select: { id: true, displayName: true, tagId: true, active: true },
+    orderBy: { displayName: "asc" },
+  });
   return {
     teachers: teachers.map((row) => ({
       id: row.id,
       name: row.displayName,
       tagId: row.tagId,
       active: row.active,
-    })),
-    receivers: receivers.map((row) => ({
-      id: row.id,
-      receiverId: row.receiverId,
-      room: row.room.name,
     })),
   };
 }
